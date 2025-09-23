@@ -17,13 +17,14 @@ class SimpleRivaASR:
 
     def __init__(self, server_url="localhost:50051"):
         self.server_url = server_url
-        self.client_path = "/home/aiadmin/riva/riva_quickstart_v2.19.0/riva_streaming_asr_client"
+        self.use_docker = True  # Use Docker containers
 
     def transcribe_file(self, audio_file: str) -> str:
         """Transcribe audio file using Riva CLI client"""
         try:
             cmd = [
-                self.client_path,
+                "sudo", "docker", "exec", "riva-speech",
+                "/opt/riva/bin/riva_streaming_asr_client",
                 f"--riva_uri={self.server_url}",
                 f"--audio_file={audio_file}",
                 "--simulate_realtime=false"
@@ -55,7 +56,7 @@ class SimpleRivaTTS:
 
     def __init__(self, server_url="localhost:50051"):
         self.server_url = server_url
-        self.client_path = "/home/aiadmin/riva/riva_quickstart_v2.19.0/riva_tts_client"
+        self.use_docker = True  # Use Docker containers
 
     def synthesize(self, text: str, voice="English-US.Female-1", sample_rate=22050) -> str:
         """Synthesize text and return path to WAV file"""
@@ -65,7 +66,8 @@ class SimpleRivaTTS:
                 output_path = tmp_file.name
 
             cmd = [
-                self.client_path,
+                "sudo", "docker", "exec", "riva-speech",
+                "/opt/riva/bin/riva_tts_client",
                 f"--riva_uri={self.server_url}",
                 f"--text={text}",
                 f"--voice_name={voice}",
