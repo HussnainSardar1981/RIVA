@@ -37,7 +37,7 @@ class SimpleRivaASR:
             # Run ASR client inside container
             cmd = [
                 "sudo", "docker", "exec", self.container,
-                "/opt/riva/bin/riva_streaming_asr_client",
+                "/opt/riva/clients/riva_streaming_asr_client",
                 f"--riva_uri={self.server_url}",
                 f"--audio_file={container_path}",
                 "--simulate_realtime=false"
@@ -95,7 +95,7 @@ class SimpleRivaTTS:
             # Run TTS client inside container
             cmd = [
                 "sudo", "docker", "exec", self.container,
-                "/opt/riva/bin/riva_tts_client",
+                "/opt/riva/clients/riva_tts_client",
                 f"--riva_uri={self.server_url}",
                 f"--text={text}",
                 f"--voice_name={voice}",
@@ -198,3 +198,4 @@ def load_wav_file(filename: str) -> tuple:
 
 if __name__ == "__main__":
     test_riva_services()
+
