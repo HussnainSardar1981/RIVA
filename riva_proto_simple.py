@@ -150,8 +150,8 @@ def test_riva_services():
         transcript = asr.transcribe_file(tts_result)
         print(f"ASR transcript: '{transcript}'")
 
-        # Cleanup test file
-        os.unlink(tts_result)
+        # Cleanup test file (use sudo for proper permissions)
+        subprocess.run(["sudo", "rm", "-f", tts_result], capture_output=True)
 
         if transcript and "voice bot" in transcript.lower():
             print("✓ Full TTS → ASR pipeline works!")
@@ -198,4 +198,3 @@ def load_wav_file(filename: str) -> tuple:
 
 if __name__ == "__main__":
     test_riva_services()
-
