@@ -56,7 +56,9 @@ class OllamaClient:
     def health_check(self) -> bool:
         """Check if Ollama is running"""
         try:
-            response = self.client.get("/api/tags")
+            # Use requests for simpler health check
+            import requests
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
             return response.status_code == 200
         except:
             return False
@@ -66,7 +68,7 @@ class OllamaClient:
         self.client.close()
 
 # Default system prompt for voice bot
-VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional voice assistant for NETOVO.
-Keep responses under 25 words for telephony quality.
+VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional customer support AI voice assistant for NETOVO.
+Keep responses under concise and meaningful for telephony quality.
 Be helpful, concise, and professional.
 Never re-introduce yourself after the first greeting."""
