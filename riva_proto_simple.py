@@ -1,6 +1,6 @@
 """
-Simple Riva gRPC implementation without proto files
-Uses the existing riva_tts_client and riva_streaming_asr_client approach
+Fixed Riva Docker implementation with proper file handling
+Handles container-to-host file copying correctly
 """
 
 import subprocess
@@ -9,87 +9,156 @@ import os
 import wave
 import numpy as np
 import structlog
+import uuid
 
 logger = structlog.get_logger()
 
 class SimpleRivaASR:
-    """Simple ASR using command line client"""
+    """Simple ASR using Docker container client"""
 
-    def __init__(self, server_url="localhost:50051"):
+    def __init__(self, server_url="localhost:50051", container="riva-speech"):
         self.server_url = server_url
-        self.use_docker = True  # Use Docker containers
+        self.container = container
 
     def transcribe_file(self, audio_file: str) -> str:
-        """Transcribe audio file using Riva CLI client"""
+        """Transcribe audio file using Riva CLI client in Docker"""
         try:
+            # Copy audio file into container
+            container_path = f"/tmp/riva_asr_input_{uuid.uuid4().hex}.wav"
+
+            # Copy host file to container
+            copy_cmd = ["sudo", "docker", "cp", audio_file, f"{self.container}:{container_path}"]
+            copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
+
+            if copy_result.returncode != 0:
+                logger.error("Failed to copy audio to container", error=copy_result.stderr)
+                return "File copy error"
+
+            # Run ASR client inside container
             cmd = [
-                "sudo", "docker", "exec", "riva-speech",
+                "sudo", "docker", "exec", self.container,
                 "/opt/riva/bin/riva_streaming_asr_client",
                 f"--riva_uri={self.server_url}",
-                f"--audio_file={audio_file}",
+                f"--audio_file={container_path}",
                 "--simulate_realtime=false"
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
+            # Cleanup container file
+            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_path],
+                          capture_output=True)
+
             if result.returncode == 0:
                 # Parse output to extract transcript
                 lines = result.stdout.strip().split('\n')
                 for line in lines:
-                    if 'transcript:' in line.lower():
-                        return line.split(':', 1)[1].strip().strip('"')
+                    # Look for transcript patterns
+                    if 'transcript:' in line.lower() or 'final' in line.lower():
+                        if ':' in line:
+                            text = line.split(':', 1)[1].strip().strip('"')
+                            if text and len(text) > 1:
+                                logger.info("ASR successful", transcript=text)
+                                return text
 
-                # If no explicit transcript line, return last non-empty line
+                # Fallback: return meaningful content
                 for line in reversed(lines):
-                    if line.strip() and not line.startswith('['):
-                        return line.strip()
+                    if line.strip() and not line.startswith('[') and len(line.strip()) > 3:
+                        text = line.strip().strip('"')
+                        logger.info("ASR fallback", transcript=text)
+                        return text
 
             logger.error("ASR failed", stdout=result.stdout, stderr=result.stderr)
-            return ""
+            return "Speech not understood"
 
         except Exception as e:
             logger.error("ASR transcription failed", error=str(e))
-            return ""
+            return "Audio processing error"
 
 class SimpleRivaTTS:
-    """Simple TTS using command line client"""
+    """Simple TTS using Docker container client"""
 
-    def __init__(self, server_url="localhost:50051"):
+    def __init__(self, server_url="localhost:50051", container="riva-speech"):
         self.server_url = server_url
-        self.use_docker = True  # Use Docker containers
+        self.container = container
 
     def synthesize(self, text: str, voice="English-US.Female-1", sample_rate=22050) -> str:
         """Synthesize text and return path to WAV file"""
         try:
-            # Create temporary output file
+            # Create host temp file (final destination)
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
-                output_path = tmp_file.name
+                host_output = tmp_file.name
 
+            # Container temp file
+            container_output = f"/tmp/riva_tts_{uuid.uuid4().hex}.wav"
+
+            # Run TTS client inside container
             cmd = [
-                "sudo", "docker", "exec", "riva-speech",
+                "sudo", "docker", "exec", self.container,
                 "/opt/riva/bin/riva_tts_client",
                 f"--riva_uri={self.server_url}",
                 f"--text={text}",
                 f"--voice_name={voice}",
-                f"--audio_file={output_path}",
+                f"--audio_file={container_output}",
                 f"--rate={sample_rate}"
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-            if result.returncode == 0 and os.path.exists(output_path):
+            if result.returncode != 0:
+                logger.error("TTS failed", stdout=result.stdout, stderr=result.stderr)
+                return ""
+
+            # Copy the file from container to host
+            copy_cmd = ["sudo", "docker", "cp", f"{self.container}:{container_output}", host_output]
+            copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
+
+            # Cleanup container file (best effort)
+            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_output],
+                          capture_output=True)
+
+            if copy_result.returncode == 0 and os.path.exists(host_output):
                 logger.info("TTS synthesis successful",
                           text=text[:50],
                           voice=voice,
-                          output=output_path)
-                return output_path
+                          output=host_output)
+                return host_output
             else:
-                logger.error("TTS failed", stdout=result.stdout, stderr=result.stderr)
+                logger.error("TTS copy failed", error=copy_result.stderr)
                 return ""
 
         except Exception as e:
             logger.error("TTS synthesis failed", error=str(e))
             return ""
+
+def test_riva_services():
+    """Test both ASR and TTS services"""
+    print("Testing Riva services...")
+
+    # Test TTS
+    print("Testing TTS...")
+    tts = SimpleRivaTTS()
+    tts_result = tts.synthesize("Hello from the voice bot integration test")
+    print(f"TTS result: {tts_result}")
+
+    if tts_result and os.path.exists(tts_result):
+        print(f"✓ TTS WAV created: {os.path.getsize(tts_result)} bytes")
+
+        # Test ASR with the generated audio
+        print("Testing ASR with generated audio...")
+        asr = SimpleRivaASR()
+        transcript = asr.transcribe_file(tts_result)
+        print(f"ASR transcript: '{transcript}'")
+
+        # Cleanup test file
+        os.unlink(tts_result)
+
+        if transcript and "voice bot" in transcript.lower():
+            print("✓ Full TTS → ASR pipeline works!")
+            return True
+
+    print("✗ Pipeline test failed")
+    return False
 
 def save_audio_as_wav(audio_data: np.ndarray, sample_rate: int, filename: str):
     """Save numpy audio array as WAV file"""
@@ -126,4 +195,6 @@ def load_wav_file(filename: str) -> tuple:
     except Exception as e:
         logger.error("Failed to load audio", error=str(e))
         return None, None
-    
+
+if __name__ == "__main__":
+    test_riva_services()
