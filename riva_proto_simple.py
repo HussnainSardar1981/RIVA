@@ -17,7 +17,7 @@ class SimpleRivaASR:
 
     def __init__(self, server_url="localhost:50051"):
         self.server_url = server_url
-        self.client_path = "/opt/riva/clients/riva_streaming_asr_client"
+        self.client_path = "/home/aiadmin/riva/riva_quickstart_v2.19.0/riva_streaming_asr_client"
 
     def transcribe_file(self, audio_file: str) -> str:
         """Transcribe audio file using Riva CLI client"""
@@ -55,7 +55,7 @@ class SimpleRivaTTS:
 
     def __init__(self, server_url="localhost:50051"):
         self.server_url = server_url
-        self.client_path = "/opt/riva/clients/riva_tts_client"
+        self.client_path = "/home/aiadmin/riva/riva_quickstart_v2.19.0/riva_tts_client"
 
     def synthesize(self, text: str, voice="English-US.Female-1", sample_rate=22050) -> str:
         """Synthesize text and return path to WAV file"""
@@ -124,3 +124,4 @@ def load_wav_file(filename: str) -> tuple:
     except Exception as e:
         logger.error("Failed to load audio", error=str(e))
         return None, None
+    
