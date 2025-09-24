@@ -34,14 +34,15 @@ class SimpleRivaASR:
                 logger.error("Failed to copy audio to container", error=copy_result.stderr)
                 return "File copy error"
 
-            # Run ASR client inside container with offline conformer
+            # Run ASR client inside container
             cmd = [
                 "sudo", "docker", "exec", self.container,
                 "/opt/riva/clients/riva_streaming_asr_client",
                 f"--riva_uri={self.server_url}",
                 f"--audio_file={container_path}",
                 "--simulate_realtime=false",
-                "--offline_conformer=true"
+                "--model_name=conformer-en-US-asr-streaming-asr-bls-ensemble",
+                "--language_code=en-US"
             ]
 
             # Add automatic punctuation control
