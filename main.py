@@ -172,10 +172,6 @@ class VoiceBot:
     
             return response
 
-    except Exception as e:
-        logger.error("LLM processing failed", error=str(e))
-        return "I'm sorry, I'm having trouble processing your request. Please try again."
-
         except Exception as e:
             logger.error("LLM processing failed", error=str(e))
             return "I'm sorry, I'm having trouble processing your request. Please try again."
