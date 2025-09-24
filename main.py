@@ -1,6 +1,6 @@
 """
-Fixed Main Voice Bot Application
-Uses working Riva integration and actual implementations
+Rewritten Main Voice Bot Application
+Fixes initialization issues with proper error handling
 """
 
 import asyncio
@@ -40,80 +40,96 @@ logger = structlog.get_logger()
 
 class VoiceBot:
     """Main Voice Bot orchestrator with working implementations"""
-    def __init__(self):
-        # Initialize working components with explicit configuration
-        self.riva_asr = SimpleRivaASR(
-            server_url=os.getenv("RIVA_SERVER", "localhost:50051")
-        )
-        self.riva_tts = SimpleRivaTTS(
-            server_url=os.getenv("RIVA_SERVER", "localhost:50051")
-        )
-        
-        # Create Ollama client with same settings as working test
-        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        ollama_model = os.getenv("OLLAMA_MODEL", "orca2:7b")
-        
-        logger.info("Creating OllamaClient", url=ollama_url, model=ollama_model)
-        self.ollama = OllamaClient(
-            base_url=ollama_url,
-            model=ollama_model
-        )
-        
-        self.audio_processor = AudioProcessor()
-        self.conversation = ConversationContext()
 
+    def __init__(self):
+        """Initialize components without testing connections yet"""
         # Audio settings
         self.telephony_rate = 8000  # 3CX/telephony
         self.asr_rate = 16000       # Riva ASR
         self.tts_rate = 22050       # Riva TTS
-
         self.running = False
         
-        logger.info("VoiceBot components created successfully")
+        # Initialize components to None - we'll create them in initialize()
+        self.ollama = None
+        self.riva_asr = None
+        self.riva_tts = None
+        self.audio_processor = None
+        self.conversation = None
+        
+        logger.info("VoiceBot constructor completed")
 
-    
     async def initialize(self):
-        """Initialize all components"""
-        logger.info("Initializing Voice Bot components...")
+        """Initialize all components with proper error handling"""
+        logger.info("Starting VoiceBot initialization...")
 
         try:
-            # Test Ollama connection with better error handling
-            logger.info("Testing Ollama connection...")
+            # Step 1: Initialize Ollama client
+            logger.info("Creating Ollama client...")
+            ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+            ollama_model = os.getenv("OLLAMA_MODEL", "orca2:7b")
             
-            # Make sure we're using the right client
-            if not self.ollama.health_check():
-                logger.error("Ollama health check failed")
-                logger.error("Please check:")
-                logger.error("1. Ollama service is running: systemctl status ollama")
-                logger.error("2. Model is available: ollama list | grep orca2")
-                logger.error("3. API endpoint accessible: curl http://localhost:11434/api/tags")
-                raise ConnectionError("Ollama not available")
-
-            logger.info("Ollama connection successful")
-
-            # Test a simple generation to make sure it works
+            self.ollama = OllamaClient(base_url=ollama_url, model=ollama_model)
+            logger.info("Ollama client created", url=ollama_url, model=ollama_model)
+            
+            # Step 2: Test Ollama health immediately after creation
+            logger.info("Testing Ollama health...")
+            health_check = self.ollama.health_check()
+            
+            if not health_check:
+                logger.error("Ollama health check failed immediately after creation")
+                logger.error("Debugging info:")
+                logger.error("- URL: %s", ollama_url)
+                logger.error("- Model: %s", ollama_model)
+                
+                # Try a direct test
+                try:
+                    import httpx
+                    with httpx.Client() as test_client:
+                        response = test_client.get(f"{ollama_url}/api/tags", timeout=5.0)
+                        logger.error("Direct API test: status=%s", response.status_code)
+                except Exception as direct_test_error:
+                    logger.error("Direct API test failed: %s", str(direct_test_error))
+                
+                raise ConnectionError("Ollama health check failed")
+            
+            logger.info("Ollama health check passed")
+            
+            # Step 3: Test Ollama generation
+            logger.info("Testing Ollama generation...")
             try:
                 test_response = await self.ollama.generate("Hello", max_tokens=5)
-                logger.info("Ollama generation test successful", response=test_response[:30])
-            except Exception as e:
-                logger.error("Ollama generation test failed", error=str(e))
-                raise ConnectionError("Ollama generation not working")
-
+                logger.info("Ollama generation test successful", response=test_response[:50])
+            except Exception as gen_error:
+                logger.error("Ollama generation test failed", error=str(gen_error))
+                raise ConnectionError("Ollama generation failed")
+            
+            # Step 4: Initialize other components
+            logger.info("Initializing other components...")
+            
+            self.riva_asr = SimpleRivaASR(
+                server_url=os.getenv("RIVA_SERVER", "localhost:50051")
+            )
+            
+            self.riva_tts = SimpleRivaTTS(
+                server_url=os.getenv("RIVA_SERVER", "localhost:50051")
+            )
+            
+            self.audio_processor = AudioProcessor()
+            self.conversation = ConversationContext()
+            
             logger.info("All components initialized successfully")
             return True
 
         except Exception as e:
-            logger.error("Initialization failed", error=str(e))
+            logger.error("Initialization failed", error=str(e), error_type=type(e).__name__)
             return False
 
     async def process_text_to_speech(self, text: str) -> str:
         """Convert text to speech and return WAV file path"""
         try:
             logger.info("Processing TTS", text=text[:50])
-
-            # Use working TTS implementation
             wav_path = self.riva_tts.synthesize(text)
-
+            
             if wav_path:
                 logger.info("TTS completed", output=wav_path)
                 return wav_path
@@ -129,10 +145,7 @@ class VoiceBot:
         """Convert speech file to text"""
         try:
             logger.info("Processing ASR", file=audio_file)
-
-            # Use working ASR implementation
             transcript = self.riva_asr.transcribe_file(audio_file)
-
             logger.info("ASR completed", transcript=transcript)
             return transcript
 
@@ -164,14 +177,10 @@ class VoiceBot:
 
         except Exception as e:
             logger.error("LLM processing failed", error=str(e))
-            # Fallback response
             return "I'm sorry, I'm having trouble processing your request. Please try again."
 
     async def process_complete_pipeline(self, input_text: str) -> str:
-        """
-        Complete pipeline: Text → TTS → ASR → LLM → TTS
-        This tests the full voice bot pipeline
-        """
+        """Complete pipeline: Text -> TTS -> ASR -> LLM -> TTS"""
         logger.info("Starting complete pipeline test", input=input_text)
 
         try:
@@ -216,31 +225,29 @@ class VoiceBot:
     async def start_interactive_mode(self):
         """Start interactive voice bot mode"""
         logger.info("Starting Interactive Voice Bot Mode")
-        print("\n🎤 NETOVO Voice Bot - Interactive Mode")
+        print("\nVoice Bot - Interactive Mode")
         print("Type 'quit' to exit")
         print("-" * 50)
 
         while True:
             try:
-                # Get user input
                 user_input = input("\nYou: ").strip()
 
                 if user_input.lower() in ['quit', 'exit', 'bye']:
-                    print("👋 Goodbye!")
+                    print("Goodbye!")
                     break
 
                 if not user_input:
                     continue
 
-                print("🤖 Processing...")
+                print("Processing...")
 
                 # Process through complete pipeline
                 response = await self.process_complete_pipeline(user_input)
-
                 print(f"Bot: {response}")
 
             except KeyboardInterrupt:
-                print("\n👋 Goodbye!")
+                print("\nGoodbye!")
                 break
             except Exception as e:
                 logger.error("Interactive mode error", error=str(e))
@@ -258,22 +265,22 @@ class VoiceBot:
         ]
 
         for i, test_text in enumerate(tests, 1):
-            print(f"\n🧪 Test {i}/{len(tests)}: {test_text}")
+            print(f"\nTest {i}/{len(tests)}: {test_text}")
 
             try:
                 result = await self.process_complete_pipeline(test_text)
-                print(f"✅ Result: {result}")
+                print(f"Result: {result}")
             except Exception as e:
-                print(f"❌ Failed: {e}")
+                print(f"Failed: {e}")
 
-        print("\n🎉 All tests completed!")
+        print("\nAll tests completed!")
 
     async def start_server(self):
         """Start the voice bot server"""
         logger.info("Starting Voice Bot server...")
 
         # Show menu
-        print("\n🎤 NETOVO Voice Bot")
+        print("\nNETOVO Voice Bot")
         print("=" * 50)
         print("1. Interactive Mode")
         print("2. Run Tests")
@@ -287,7 +294,7 @@ class VoiceBot:
         elif choice == "2":
             await self.run_tests()
         elif choice == "3":
-            print("👋 Goodbye!")
+            print("Goodbye!")
         else:
             print("Invalid choice. Exiting.")
 
@@ -296,8 +303,7 @@ class VoiceBot:
         logger.info("Shutting down Voice Bot...")
         self.running = False
 
-        # Close connections
-        if hasattr(self.ollama, 'close'):
+        if self.ollama:
             self.ollama.close()
 
         logger.info("Voice Bot shutdown complete")
@@ -315,16 +321,24 @@ async def main():
     """Main entry point"""
     logger.info("Starting NETOVO Professional Voice Bot")
 
-    voice_bot = VoiceBot()
-    setup_signal_handlers(voice_bot)
+    try:
+        voice_bot = VoiceBot()
+        setup_signal_handlers(voice_bot)
 
-    # Initialize components
-    if not await voice_bot.initialize():
-        logger.error("Failed to initialize. Exiting.")
+        # Initialize components
+        logger.info("Initializing Voice Bot...")
+        if not await voice_bot.initialize():
+            logger.error("Failed to initialize. Exiting.")
+            sys.exit(1)
+
+        logger.info("Voice Bot initialization successful")
+        
+        # Start server
+        await voice_bot.start_server()
+        
+    except Exception as e:
+        logger.error("Main execution failed", error=str(e))
         sys.exit(1)
-
-    # Start server
-    await voice_bot.start_server()
 
 if __name__ == "__main__":
     asyncio.run(main())
