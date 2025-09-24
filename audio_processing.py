@@ -13,6 +13,7 @@ import os
 import structlog
 from difflib import SequenceMatcher
 import string
+import jiwer
 
 logger = structlog.get_logger()
 
@@ -207,13 +208,31 @@ def normalize_text(text: str) -> str:
 
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
-    """Calculate normalized text similarity using SequenceMatcher"""
+    """Calculate text similarity using WER (Word Error Rate) - more appropriate for ASR testing"""
     norm1 = normalize_text(text1)
     norm2 = normalize_text(text2)
 
     if not norm1 or not norm2:
         return 0.0
 
-    # Use SequenceMatcher for similarity ratio
-    matcher = SequenceMatcher(None, norm1, norm2)
-    return matcher.ratio()
+    try:
+        # Calculate WER (Word Error Rate)
+        wer = jiwer.wer(norm1, norm2)
+        # Convert WER to similarity score (1.0 - WER)
+        # WER of 0 = perfect match (similarity = 1.0)
+        # WER of 1 = completely different (similarity = 0.0)
+        similarity = max(0.0, 1.0 - wer)
+
+        logger.debug("WER calculation",
+                    reference=norm1[:50],
+                    hypothesis=norm2[:50],
+                    wer=wer,
+                    similarity=similarity)
+
+        return similarity
+
+    except Exception as e:
+        logger.warning("WER calculation failed, falling back to SequenceMatcher", error=str(e))
+        # Fallback to original method if WER fails
+        matcher = SequenceMatcher(None, norm1, norm2)
+        return matcher.ratio()
