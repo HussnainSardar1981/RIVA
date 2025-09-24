@@ -1,5 +1,5 @@
 """
-Resilient Ollama client for ORCA2:7b LLM
+Fixed Ollama client for ORCA2:7b LLM
 Connects to local Ollama on localhost:11434
 """
 
@@ -16,6 +16,7 @@ class OllamaClient:
     def __init__(self, base_url="http://localhost:11434", model="orca2:7b"):
         self.base_url = base_url
         self.model = model
+        # Use synchronous client for both sync and async methods
         self.client = httpx.Client(base_url=base_url, timeout=30.0)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
@@ -56,16 +57,40 @@ class OllamaClient:
     def health_check(self) -> bool:
         """Check if Ollama is running"""
         try:
-            # Use requests for simpler health check
-            import requests
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
-            return response.status_code == 200
-        except:
+            logger.info("Checking Ollama health", url=self.base_url)
+            response = self.client.get("/api/tags")
+            
+            if response.status_code == 200:
+                tags_data = response.json()
+                logger.info("Ollama health check passed", models=len(tags_data.get('models', [])))
+                
+                # Check if our model is available
+                models = tags_data.get('models', [])
+                model_names = [model.get('name', '') for model in models]
+                
+                if any(self.model in name for name in model_names):
+                    logger.info("Target model found", model=self.model)
+                    return True
+                else:
+                    logger.warning("Target model not found", 
+                                 model=self.model, 
+                                 available=model_names)
+                    return True  # Still return True if Ollama is running
+            else:
+                logger.error("Ollama health check failed", status=response.status_code)
+                return False
+                
+        except httpx.ConnectError as e:
+            logger.error("Cannot connect to Ollama", error=str(e), url=self.base_url)
+            return False
+        except Exception as e:
+            logger.error("Ollama health check error", error=str(e))
             return False
 
     def close(self):
         """Close the HTTP client"""
-        self.client.close()
+        if self.client:
+            self.client.close()
 
 # Default system prompt for voice bot
 VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional customer support AI voice assistant for NETOVO.
