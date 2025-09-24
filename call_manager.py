@@ -15,7 +15,10 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from main import VoiceBot, VoiceBotConfig
+# Import VoiceBotConfig directly to avoid circular import
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import VoiceBot, VoiceBotConfig
 from conversation_context import ConversationContext
 from telephony.custom_sip import CustomSIPClient
 from telephony.rtp_bridge import RTPAudioBridge, RTPSession
@@ -23,10 +26,19 @@ from telephony.audio_codec import AudioCodec
 
 logger = structlog.get_logger()
 
+def _import_voice_bot_classes():
+    """Dynamically import VoiceBot classes to avoid circular imports"""
+    try:
+        import main
+        return main.VoiceBot, main.VoiceBotConfig
+    except ImportError as e:
+        logger.error("Failed to import VoiceBot classes", error=str(e))
+        return None, None
+
 class CallFlowManager:
     """Manages complete call flow from 3CX to AI Voice Bot"""
 
-    def __init__(self, sip_config: Dict[str, Any], voice_bot_config: VoiceBotConfig):
+    def __init__(self, sip_config: Dict[str, Any], voice_bot_config: Dict[str, Any]):
         """
         Initialize Call Flow Manager
 
@@ -39,7 +51,7 @@ class CallFlowManager:
 
         # Initialize components
         self.sip_handler: Optional[CustomSIPClient] = None
-        self.voice_bot: Optional[VoiceBot] = None
+        self.voice_bot: Optional[Any] = None
         self.audio_codec = AudioCodec()
 
         # Active sessions management
@@ -59,6 +71,11 @@ class CallFlowManager:
             logger.info("Initializing Call Flow Manager components...")
 
             # Step 1: Initialize Voice Bot
+            VoiceBot, VoiceBotConfig = _import_voice_bot_classes()
+            if not VoiceBot:
+                logger.error("Failed to import VoiceBot class")
+                return False
+
             self.voice_bot = VoiceBot(self.voice_bot_config)
             if not await self.voice_bot.initialize():
                 logger.error("Voice Bot initialization failed")
