@@ -7,7 +7,12 @@ import numpy as np
 import soxr
 import webrtcvad
 import audioop
+import wave
+import tempfile
+import os
 import structlog
+from difflib import SequenceMatcher
+import string
 
 logger = structlog.get_logger()
 
@@ -87,6 +92,50 @@ class AudioProcessor:
         speech_ratio = speech_frames / total_frames
         return speech_ratio > 0.3
 
+    def resample_wav(self, input_wav_path: str, target_rate: int) -> str:
+        """Resample WAV file to target sample rate, return new file path"""
+        try:
+            # Read input WAV
+            with wave.open(input_wav_path, 'rb') as wav_in:
+                frames = wav_in.readframes(wav_in.getnframes())
+                sample_rate = wav_in.getframerate()
+                channels = wav_in.getnchannels()
+
+            # Convert to numpy array
+            if channels == 1:
+                audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            else:
+                # Convert stereo to mono
+                audio = np.frombuffer(frames, dtype=np.int16).reshape(-1, channels).astype(np.float32) / 32768.0
+                audio = audio.mean(axis=1)
+
+            # Resample if needed
+            if sample_rate != target_rate:
+                audio = self.resample(audio, sample_rate, target_rate)
+
+            # Create output file
+            output_fd, output_path = tempfile.mkstemp(suffix='.wav')
+            os.close(output_fd)
+
+            # Write resampled audio
+            with wave.open(output_path, 'wb') as wav_out:
+                wav_out.setnchannels(1)
+                wav_out.setsampwidth(2)  # 16-bit
+                wav_out.setframerate(target_rate)
+                audio_int16 = (audio * 32767).astype(np.int16)
+                wav_out.writeframes(audio_int16.tobytes())
+
+            logger.debug("WAV resampled",
+                        input_rate=sample_rate,
+                        output_rate=target_rate,
+                        output_file=output_path)
+
+            return output_path
+
+        except Exception as e:
+            logger.error("WAV resampling failed", error=str(e))
+            return input_wav_path  # Return original on failure
+
 class AudioBuffer:
     """Circular buffer for audio processing"""
 
@@ -138,3 +187,33 @@ class AudioBuffer:
             result[:first_part] = self.buffer[start_pos:]
             result[first_part:] = self.buffer[:samples_needed - first_part]
             return result
+
+
+def normalize_text(text: str) -> str:
+    """Normalize text for comparison: lowercase, strip punctuation"""
+    if not text:
+        return ""
+
+    # Convert to lowercase
+    normalized = text.lower()
+
+    # Remove punctuation
+    normalized = normalized.translate(str.maketrans('', '', string.punctuation))
+
+    # Normalize whitespace
+    normalized = ' '.join(normalized.split())
+
+    return normalized
+
+
+def calculate_text_similarity(text1: str, text2: str) -> float:
+    """Calculate normalized text similarity using SequenceMatcher"""
+    norm1 = normalize_text(text1)
+    norm2 = normalize_text(text2)
+
+    if not norm1 or not norm2:
+        return 0.0
+
+    # Use SequenceMatcher for similarity ratio
+    matcher = SequenceMatcher(None, norm1, norm2)
+    return matcher.ratio()
