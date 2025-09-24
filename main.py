@@ -68,9 +68,27 @@ class VoiceBot:
         logger.info("Initializing Voice Bot components...")
 
         try:
-            # Test Ollama connection
+            # Test Ollama connection with better error handling
+            logger.info("Testing Ollama connection...")
+            
+            # Make sure we're using the right client
             if not self.ollama.health_check():
+                logger.error("Ollama health check failed")
+                logger.error("Please check:")
+                logger.error("1. Ollama service is running: systemctl status ollama")
+                logger.error("2. Model is available: ollama list | grep orca2")
+                logger.error("3. API endpoint accessible: curl http://localhost:11434/api/tags")
                 raise ConnectionError("Ollama not available")
+
+            logger.info("Ollama connection successful")
+
+            # Test a simple generation to make sure it works
+            try:
+                test_response = await self.ollama.generate("Hello", max_tokens=5)
+                logger.info("Ollama generation test successful", response=test_response[:30])
+            except Exception as e:
+                logger.error("Ollama generation test failed", error=str(e))
+                raise ConnectionError("Ollama generation not working")
 
             logger.info("All components initialized successfully")
             return True
