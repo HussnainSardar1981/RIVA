@@ -226,6 +226,29 @@ class CustomSIPClient:
         except Exception as e:
             logger.error("Error handling ACK", error=str(e))
 
+    def _extract_caller_number(self, from_header: str) -> str:
+        """Extract caller number from SIP From header"""
+        try:
+            # Parse SIP From header to extract number
+            # Example: "John Doe" <sip:1234@domain.com>
+            if '<sip:' in from_header and '@' in from_header:
+                start = from_header.find('<sip:') + 5
+                end = from_header.find('@', start)
+                if start > 4 and end > start:
+                    return from_header[start:end]
+
+            # Fallback parsing
+            import re
+            number_match = re.search(r'sip:(\d+)@', from_header)
+            if number_match:
+                return number_match.group(1)
+
+            return "Unknown"
+
+        except Exception as e:
+            logger.error("Error extracting caller number", error=str(e))
+            return "Unknown"
+
     def _handle_auth_challenge(self, headers: Dict):
         """Handle authentication challenge"""
         try:
