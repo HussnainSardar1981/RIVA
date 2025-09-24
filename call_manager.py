@@ -332,8 +332,9 @@ class CallSession:
             # Create RTP session
             self.rtp_session = RTPSession(self.call_id, self.rtp_bridge)
 
-            # Start bridge (in production, would use actual RTP parameters from SDP)
-            await self.rtp_bridge.start_bridge("localhost", 10000)
+            # Start bridge using assigned RTP port range (9000-10999)
+            rtp_start_port = 9000  # Your assigned RTP port range starts at 9000
+            await self.rtp_bridge.start_bridge("localhost", rtp_start_port)
 
             logger.info("RTP bridge initialized", call_id=self.call_id)
 
