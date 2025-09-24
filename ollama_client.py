@@ -33,8 +33,10 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "num_predict": max_tokens,
-                "temperature": 0.3,
-                "stop": ["Human:", "\n\n"]
+                "temperature": 0.1,  # Lower temperature for more focused responses
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+                "stop": ["Human:", "\n\nHuman:", "User:", "\n\nUser:"]
             }
         }
 
@@ -67,7 +69,22 @@ class OllamaClient:
         self.client.close()
 
 # Default system prompt for voice bot
-VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional customer support AI voice assistant for NETOVO.
-Keep responses under concise and meaningful for telephony quality.
-Be helpful, concise, and professional.
-Never re-introduce yourself after the first greeting."""
+VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional customer support AI for NETOVO, a technology services company.
+
+IMPORTANT INSTRUCTIONS:
+- Answer questions directly and specifically
+- Keep responses under 50 words for voice calls
+- Be professional and helpful
+- Focus on the specific question asked
+- For technical issues, provide clear next steps
+- For service questions, explain NETOVO's capabilities
+- Never give generic responses like "How may I help you today?"
+
+NETOVO Services:
+- IT infrastructure and cloud services
+- Network solutions and security
+- Voice/telephony systems (3CX, Asterisk)
+- Technical support and consulting
+
+Answer the human's specific question directly."""
+
