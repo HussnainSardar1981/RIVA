@@ -156,24 +156,25 @@ class VoiceBot:
     async def get_llm_response(self, transcript: str) -> str:
         """Get response from Ollama LLM"""
         try:
-            # Build context-aware prompt
-            prompt = self.conversation.build_prompt(transcript, VOICE_BOT_SYSTEM_PROMPT)
-
-            # Generate response
+            # Simple approach: just use transcript with system prompt
             response = await self.ollama.generate(
                 prompt=transcript,
                 system_prompt=VOICE_BOT_SYSTEM_PROMPT,
-                max_tokens=50  # Keep responses short for telephony
+                max_tokens=50
             )
-
+    
             # Add to conversation history
             self.conversation.add_turn(transcript, response)
-
+    
             logger.info("LLM response generated",
                        input=transcript[:50],
                        output=response[:50])
-
+    
             return response
+
+    except Exception as e:
+        logger.error("LLM processing failed", error=str(e))
+        return "I'm sorry, I'm having trouble processing your request. Please try again."
 
         except Exception as e:
             logger.error("LLM processing failed", error=str(e))
