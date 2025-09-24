@@ -21,6 +21,20 @@ from ollama_client import OllamaClient, VOICE_BOT_SYSTEM_PROMPT
 from audio_processing import AudioProcessor, AudioBuffer, calculate_text_similarity
 from conversation_context import ConversationContext
 
+# Import telephony integration (Phase 2)
+try:
+    import yaml
+    from telephony.call_manager import CallFlowManager
+    from telephony.custom_sip import CustomSIPClient
+    from telephony.rtp_bridge import RTPAudioBridge
+    from telephony.audio_codec import AudioCodec
+    from telephony.advanced_vad import AdvancedVAD
+    TELEPHONY_AVAILABLE = True
+    logger.info("Telephony integration modules loaded successfully")
+except ImportError as e:
+    TELEPHONY_AVAILABLE = False
+    logger.warning("Telephony integration not available", error=str(e))
+
 # Load environment variables from .env file
 ENV_FILE = Path(__file__).parent / ".env"
 load_dotenv(ENV_FILE)
@@ -579,21 +593,33 @@ class VoiceBot:
         logger.info("Starting Voice Bot server...")
         self.running = True
 
-        print(f"\n🎯 NETOVO Voice Bot v1.0")
-        print("=" * 50)
-        print("1. Interactive Mode")
-        print("2. Run Comprehensive Tests")
-        print("3. Exit")
-        print("=" * 50)
+        print(f"\n🎯 NETOVO Voice Bot v2.0 - Phase 2: Telephony Integration")
+        print("=" * 70)
+        print("1. Interactive Mode (Phase 1 - Core Pipeline)")
+        print("2. Run Comprehensive Tests (Phase 1)")
+        if TELEPHONY_AVAILABLE:
+            print("3. Start Telephony Mode (Phase 2 - 3CX Integration)")
+            print("4. Run Telephony Tests (Phase 2)")
+            print("5. Exit")
+        else:
+            print("3. Exit")
+            print("\n⚠️  Telephony integration not available - install dependencies with:")
+            print("   pip install aiortc aiosip PyYAML")
+        print("=" * 70)
 
         try:
-            choice = input("Choose option (1-3): ").strip()
+            max_choice = 5 if TELEPHONY_AVAILABLE else 3
+            choice = input(f"Choose option (1-{max_choice}): ").strip()
 
             if choice == "1":
                 await self.start_interactive_mode()
             elif choice == "2":
                 await self.run_tests()
-            elif choice == "3":
+            elif choice == "3" and TELEPHONY_AVAILABLE:
+                await self.start_telephony_mode()
+            elif choice == "4" and TELEPHONY_AVAILABLE:
+                await self.run_telephony_tests()
+            elif choice == str(max_choice):
                 print("👋 Goodbye!")
             else:
                 print("❌ Invalid choice. Exiting.")
@@ -622,6 +648,194 @@ class VoiceBot:
                 logger.warning("Error closing Ollama client", error=str(e))
 
         logger.info("Resource cleanup completed")
+
+    async def start_telephony_mode(self):
+        """Start telephony integration mode for 3CX"""
+        if not TELEPHONY_AVAILABLE:
+            print("❌ Telephony integration not available")
+            return
+
+        try:
+            logger.info("Starting Telephony Integration Mode")
+            print("\n📞 NETOVO Voice Bot - Telephony Mode")
+            print("Connecting to 3CX PBX server...")
+
+            # Load telephony configuration
+            telephony_config = await self._load_telephony_config()
+            if not telephony_config:
+                print("❌ Failed to load telephony configuration")
+                return
+
+            # Create and initialize Call Flow Manager
+            call_manager = CallFlowManager(
+                sip_config=telephony_config['sip'],
+                voice_bot_config=self.config
+            )
+
+            # Initialize telephony components
+            if not await call_manager.initialize():
+                print("❌ Failed to initialize telephony components")
+                return
+
+            print("✅ Telephony components initialized")
+            print("📞 Registering with 3CX server...")
+
+            # Start telephony services
+            await call_manager.start()
+
+            print("✅ Successfully connected to 3CX!")
+            print(f"📞 Voice Bot ready to receive calls on extension {telephony_config['sip']['username']}")
+            print("🎙️  AI Voice Assistant: Alexis")
+            print("\nPress Ctrl+C to stop the service")
+            print("-" * 50)
+
+            # Keep the service running
+            try:
+                while self.running:
+                    await asyncio.sleep(1)
+
+                    # Log periodic status
+                    status = call_manager.get_status()
+                    if status['active_sessions'] > 0:
+                        logger.info("Telephony status",
+                                  active_calls=status['active_sessions'],
+                                  total_calls=status['total_calls'])
+
+            except KeyboardInterrupt:
+                print("\n📞 Stopping telephony service...")
+
+            # Graceful shutdown
+            await call_manager.stop()
+            print("✅ Telephony service stopped")
+
+        except Exception as e:
+            logger.error("Telephony mode failed", error=str(e))
+            print(f"❌ Telephony mode error: {e}")
+
+    async def _load_telephony_config(self) -> Optional[Dict[str, Any]]:
+        """Load telephony configuration from YAML file"""
+        try:
+            config_path = Path(__file__).parent / "config" / "telephony.yaml"
+
+            if not config_path.exists():
+                logger.error("Telephony configuration file not found", path=str(config_path))
+                return None
+
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+
+            # Substitute environment variables
+            config = self._substitute_env_vars(config)
+
+            # Validate required configuration
+            required_keys = ['sip', 'audio', 'voice_bot']
+            for key in required_keys:
+                if key not in config:
+                    logger.error("Missing required configuration section", section=key)
+                    return None
+
+            logger.info("Telephony configuration loaded successfully")
+            return config
+
+        except Exception as e:
+            logger.error("Failed to load telephony configuration", error=str(e))
+            return None
+
+    def _substitute_env_vars(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Substitute environment variables in configuration"""
+        def substitute_value(value):
+            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                env_var = value[2:-1]
+                return os.getenv(env_var, value)
+            elif isinstance(value, dict):
+                return {k: substitute_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [substitute_value(item) for item in value]
+            else:
+                return value
+
+        return substitute_value(config)
+
+    async def run_telephony_tests(self):
+        """Run telephony integration tests"""
+        if not TELEPHONY_AVAILABLE:
+            print("❌ Telephony integration not available")
+            return
+
+        try:
+            logger.info("Running Telephony Integration Tests")
+            print("\n🧪 NETOVO Voice Bot - Telephony Integration Tests")
+            print("=" * 60)
+
+            # Import and run telephony tests
+            from tests.test_telephony import (
+                TestAudioCodec, TestAdvancedVAD, TestRTPAudioBridge,
+                TestCustomSIPClient, TestIntegrationScenarios,
+                test_end_to_end_call_simulation
+            )
+
+            test_classes = [
+                ("Audio Codec", TestAudioCodec),
+                ("Advanced VAD", TestAdvancedVAD),
+                ("RTP Bridge", TestRTPAudioBridge),
+                ("Custom SIP Client", TestCustomSIPClient),
+                ("Integration", TestIntegrationScenarios)
+            ]
+
+            total_tests = 0
+            passed_tests = 0
+
+            for test_name, test_class in test_classes:
+                print(f"\n📋 Running {test_name} Tests...")
+
+                test_instance = test_class()
+                test_methods = [method for method in dir(test_instance)
+                              if method.startswith('test_')]
+
+                for test_method in test_methods:
+                    total_tests += 1
+                    try:
+                        if hasattr(test_instance, 'setup_method'):
+                            test_instance.setup_method()
+
+                        method = getattr(test_instance, test_method)
+
+                        if asyncio.iscoroutinefunction(method):
+                            await method()
+                        else:
+                            method()
+
+                        print(f"  ✅ {test_method}")
+                        passed_tests += 1
+
+                    except Exception as e:
+                        print(f"  ❌ {test_method}: {e}")
+                        logger.error("Test failed", test=test_method, error=str(e))
+
+            # Run end-to-end test
+            print(f"\n📋 Running End-to-End Telephony Test...")
+            total_tests += 1
+            try:
+                await test_end_to_end_call_simulation()
+                print(f"  ✅ End-to-end telephony simulation")
+                passed_tests += 1
+            except Exception as e:
+                print(f"  ❌ End-to-end telephony simulation: {e}")
+                logger.error("End-to-end test failed", error=str(e))
+
+            print(f"\n📊 Telephony Test Results: {passed_tests}/{total_tests} passed")
+            print(f"⏱️  Success Rate: {(passed_tests/total_tests*100):.1f}%")
+
+            if passed_tests == total_tests:
+                print("🎉 All telephony integration tests passed!")
+                print("✅ System ready for 3CX deployment")
+            else:
+                print(f"❌ {total_tests - passed_tests} telephony tests failed")
+                print("⚠️  Review failures before deploying to production")
+
+        except Exception as e:
+            logger.error("Telephony testing failed", error=str(e))
+            print(f"❌ Telephony testing error: {e}")
 
     async def shutdown(self):
         """Graceful shutdown"""
