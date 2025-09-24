@@ -158,6 +158,9 @@ class CustomSIPClient:
                 elif status_code == 401:
                     # Authentication required
                     self._handle_auth_challenge(headers)
+                elif status_code == 407:
+                    # Proxy Authentication required
+                    self._handle_auth_challenge(headers, proxy_auth=True)
                 else:
                     logger.warning("SIP response", code=status_code)
 
@@ -249,10 +252,14 @@ class CustomSIPClient:
             logger.error("Error extracting caller number", error=str(e))
             return "Unknown"
 
-    def _handle_auth_challenge(self, headers: Dict):
+    def _handle_auth_challenge(self, headers: Dict, proxy_auth: bool = False):
         """Handle authentication challenge"""
         try:
-            www_auth = headers.get('www-authenticate', '')
+            # Handle both WWW-Authenticate (401) and Proxy-Authenticate (407)
+            if proxy_auth:
+                www_auth = headers.get('proxy-authenticate', headers.get('www-authenticate', ''))
+            else:
+                www_auth = headers.get('www-authenticate', '')
 
             # Extract nonce and realm
             if 'nonce=' in www_auth:
@@ -308,14 +315,16 @@ class CustomSIPClient:
 
         msg_lines = [
             f"REGISTER sip:{self.server} SIP/2.0",
-            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};branch=z9hG4bK{uuid.uuid4().hex[:8]}",
+            f"Via: SIP/2.0/UDP {self.local_ip}:{self.local_port};rport;branch=z9hG4bK{uuid.uuid4().hex[:8]}",
             f"From: <{from_uri}>;tag={uuid.uuid4().hex[:8]}",
             f"To: <{to_uri}>",
-            f"Contact: <{contact_uri}>",
+            f"Contact: <{contact_uri}>;expires=3600;transport=udp",
             f"Call-ID: {call_id}",
             f"CSeq: {self.sequence_number} REGISTER",
             "Max-Forwards: 70",
             "Expires: 3600",
+            "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS, REGISTER, INFO",
+            "Supported: path, replaces",
             f"User-Agent: NETOVO-VoiceBot/2.0",
             "Content-Length: 0"
         ]
