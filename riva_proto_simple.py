@@ -60,23 +60,22 @@ class SimpleRivaASR:
                 lines = result.stdout.strip().split('\n')
 
                 # Look for RIVA's actual format: "Final transcripts:" followed by "0 : text"
-                in_transcripts_section = False
-                for line in lines:
+                for i, line in enumerate(lines):
                     if 'final transcripts:' in line.lower():
-                        in_transcripts_section = True
-                        continue
-
-                    if in_transcripts_section and line.strip():
-                        # Look for format "0 : actual transcript text"
-                        if ':' in line and (line.strip().startswith('0 :') or line.strip().startswith('1 :')):
-                            # Extract text after "0 :" or "1 :"
-                            text = line.split(':', 1)[1].strip().strip('"')
-                            if text and len(text) > 1 and not text.startswith('Throughput'):
-                                logger.info("ASR final transcript found", transcript=text)
-                                return text
-                        # Stop if we hit a separator or new section
-                        if '---' in line or 'Timestamps:' in line:
-                            break
+                        # Look at the next few lines for the transcript
+                        for j in range(i+1, min(i+5, len(lines))):
+                            next_line = lines[j].strip()
+                            if next_line and ':' in next_line:
+                                # Check if it starts with "0 :" pattern
+                                if next_line.startswith('0 :') or next_line.startswith('1 :'):
+                                    # Extract text after "0 :"
+                                    text = next_line.split(':', 1)[1].strip().strip('"')
+                                    if text and len(text) > 1 and not text.startswith('Throughput'):
+                                        logger.info("ASR final transcript found", transcript=text)
+                                        return text
+                                # Stop if we hit timestamps or other sections
+                                if 'timestamps:' in next_line.lower() or '---' in next_line:
+                                    break
 
                 # Look for quoted text that looks like speech
                 for line in lines:
