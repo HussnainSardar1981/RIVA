@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Import working implementations
 from riva_proto_simple import SimpleRivaASR, SimpleRivaTTS
 from ollama_client import OllamaClient, VOICE_BOT_SYSTEM_PROMPT
-from audio_processing import AudioProcessor, AudioBuffer
+from audio_processing import AudioProcessor, AudioBuffer, calculate_text_similarity
 from conversation_context import ConversationContext
 
 # Load environment variables from .env file
@@ -259,7 +259,7 @@ class VoiceBot:
             logger.error("TTS processing failed", error=str(e))
             return ""
 
-    async def process_speech_to_text(self, audio_file: str) -> str:
+    async def process_speech_to_text(self, audio_file: str, for_testing: bool = False) -> str:
         """Convert speech file to text"""
         if not audio_file or not os.path.exists(audio_file):
             logger.error("Audio file does not exist", file=audio_file)
@@ -267,7 +267,18 @@ class VoiceBot:
 
         try:
             logger.info("Processing ASR", file=audio_file)
-            transcript = self.riva_asr.transcribe_file(audio_file)
+
+            # Resample to 16kHz before ASR processing
+            resampled_file = self.audio_processor.resample_wav(audio_file, 16000)
+
+            # Use appropriate punctuation settings for testing vs production
+            automatic_punctuation = not for_testing  # False for tests, True for production
+
+            transcript = self.riva_asr.transcribe_file(resampled_file, automatic_punctuation=automatic_punctuation)
+
+            # Cleanup resampled file if different from original
+            if resampled_file != audio_file:
+                self.temp_files.add(resampled_file)
 
             if transcript and transcript.strip():
                 logger.info("ASR completed successfully", transcript=transcript[:100])
@@ -344,25 +355,22 @@ class VoiceBot:
 
             # Step 2: Speech to Text
             logger.info("Pipeline Step 2: Speech to Text")
-            transcript = await self.process_speech_to_text(tts_file)
+            transcript = await self.process_speech_to_text(tts_file, for_testing=True)
 
             if not transcript:
                 test_result.add_step("ASR", False, "Empty transcript")
                 test_result.finish(False, "ASR returned empty transcript")
                 return test_result
 
-            # Validate transcript similarity (basic check)
-            input_words = set(input_text.lower().split())
-            transcript_words = set(transcript.lower().split())
-            common_words = input_words.intersection(transcript_words)
-            similarity = len(common_words) / max(len(input_words), 1)
+            # Use improved text similarity validation
+            similarity_score = calculate_text_similarity(input_text, transcript)
 
-            if similarity < 0.3:  # Less than 30% word overlap
-                test_result.add_step("ASR", False, f"Low similarity: {similarity:.2%}")
-                test_result.finish(False, f"ASR transcript too different from input")
+            if similarity_score < 0.70:  # 70% similarity threshold
+                test_result.add_step("ASR", False, f"Similarity too low: {similarity_score:.2%}")
+                test_result.finish(False, f"ASR transcript similarity below threshold: {similarity_score:.2%}")
                 return test_result
 
-            test_result.add_step("ASR", True, f"Transcript: '{transcript[:50]}...' (similarity: {similarity:.2%})")
+            test_result.add_step("ASR", True, f"Transcript: '{transcript[:50]}...' (similarity: {similarity_score:.2%})")
 
             # Step 3: LLM Processing
             logger.info("Pipeline Step 3: LLM Processing")
@@ -408,7 +416,7 @@ class VoiceBot:
                 "input": input_text,
                 "transcript": transcript,
                 "llm_response": llm_response,
-                "similarity": similarity,
+                "similarity": similarity_score,
                 "tts_file_size": file_size,
                 "response_file_size": response_file_size
             }
