@@ -16,7 +16,7 @@ import structlog
 from dotenv import load_dotenv
 
 # Import working implementations
-from riva_proto_simple import SimpleRivaASR, SimpleRivaTTS
+from riva_client import RivaASRClient, RivaTTSClient
 from ollama_client import OllamaClient, VOICE_BOT_SYSTEM_PROMPT
 from audio_processing import AudioProcessor, AudioBuffer, calculate_text_similarity
 from conversation_context import ConversationContext
@@ -132,8 +132,8 @@ class VoiceBot:
 
         # Initialize components to None - we'll create them in initialize()
         self.ollama: Optional[OllamaClient] = None
-        self.riva_asr: Optional[SimpleRivaASR] = None
-        self.riva_tts: Optional[SimpleRivaTTS] = None
+        self.riva_asr: Optional[RivaASRClient] = None
+        self.riva_tts: Optional[RivaTTSClient] = None
         self.audio_processor: Optional[AudioProcessor] = None
         self.conversation: Optional[ConversationContext] = None
 
@@ -217,9 +217,16 @@ class VoiceBot:
         logger.info("Initializing Riva components...")
 
         try:
-            self.riva_asr = SimpleRivaASR(server_url=self.config.riva_server)
-            self.riva_tts = SimpleRivaTTS(server_url=self.config.riva_server)
-            logger.info("Riva components initialized")
+            self.riva_asr = RivaASRClient(server_url=self.config.riva_server)
+            self.riva_tts = RivaTTSClient(server_url=self.config.riva_server)
+
+            # Test connections
+            asr_connected = self.riva_asr.connect()
+            tts_connected = self.riva_tts.connect()
+
+            logger.info("Riva components initialized",
+                       asr_connected=asr_connected,
+                       tts_connected=tts_connected)
         except Exception as e:
             logger.error("Riva initialization failed", error=str(e))
             raise ConnectionError(f"Riva initialization failed: {e}")
@@ -365,9 +372,9 @@ class VoiceBot:
             # Use improved text similarity validation
             similarity_score = calculate_text_similarity(input_text, transcript)
 
-            if similarity_score < 0.20:  # 20% similarity threshold (very lenient for testing)
-                test_result.add_step("ASR", False, f"Similarity too low: {similarity_score:.2%}")
-                test_result.finish(False, f"ASR transcript similarity below threshold: {similarity_score:.2%}")
+            if similarity_score < 0.50:  # 50% WER-based similarity threshold (reasonable for ASR testing)
+                test_result.add_step("ASR", False, f"WER-based similarity too low: {similarity_score:.2%}")
+                test_result.finish(False, f"ASR transcript WER-based similarity below threshold: {similarity_score:.2%}")
                 return test_result
 
             test_result.add_step("ASR", True, f"Transcript: '{transcript[:50]}...' (similarity: {similarity_score:.2%})")
