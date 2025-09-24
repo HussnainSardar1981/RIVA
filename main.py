@@ -42,36 +42,36 @@ class VoiceBot:
     """Main Voice Bot orchestrator with working implementations"""
 
     def __init__(self):
-    # Initialize components with explicit logging
-    logger.info("Initializing VoiceBot components...")
+        # Initialize components with explicit logging
+        logger.info("Initializing VoiceBot components...")
+        
+        # Create Ollama client with same exact settings as test
+        logger.info("Creating OllamaClient...")
+        self.ollama = OllamaClient(
+            base_url="http://localhost:11434",
+            model="orca2:7b"
+        )
+        logger.info("OllamaClient created")
+        
+        # Test immediately after creation
+        health = self.ollama.health_check()
+        logger.info("OllamaClient health check", result=health)
+        
+        # Initialize other components
+        self.riva_asr = SimpleRivaASR(
+            server_url=os.getenv("RIVA_SERVER", "localhost:50051")
+        )
+        self.riva_tts = SimpleRivaTTS(
+            server_url=os.getenv("RIVA_SERVER", "localhost:50051")
+        )
+        self.audio_processor = AudioProcessor()
+        self.conversation = ConversationContext()
     
-    # Create Ollama client with same exact settings as test
-    logger.info("Creating OllamaClient...")
-    self.ollama = OllamaClient(
-        base_url="http://localhost:11434",
-        model="orca2:7b"
-    )
-    logger.info("OllamaClient created")
-    
-    # Test immediately after creation
-    health = self.ollama.health_check()
-    logger.info("OllamaClient health check", result=health)
-    
-    # Initialize other components
-    self.riva_asr = SimpleRivaASR(
-        server_url=os.getenv("RIVA_SERVER", "localhost:50051")
-    )
-    self.riva_tts = SimpleRivaTTS(
-        server_url=os.getenv("RIVA_SERVER", "localhost:50051")
-    )
-    self.audio_processor = AudioProcessor()
-    self.conversation = ConversationContext()
-
-    # Audio settings
-    self.telephony_rate = 8000
-    self.asr_rate = 16000
-    self.tts_rate = 22050
-    self.running = False
+        # Audio settings
+        self.telephony_rate = 8000
+        self.asr_rate = 16000
+        self.tts_rate = 22050
+        self.running = False
 
     async def initialize(self):
         """Initialize all components"""
