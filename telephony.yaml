@@ -1,0 +1,212 @@
+# NETOVO AI Voice Bot - Telephony Configuration
+# 3CX Integration Settings for Production Deployment
+
+# SIP Server Configuration
+sip:
+  server: "mtipbx.ny.3cx.us"
+  port: 5060
+  username: "1600"
+  password: "${THREECX_PASSWORD}"  # From environment variable
+  display_name: "NETOVO AI Voice Bot"
+  domain: "mtipbx.ny.3cx.us"
+
+  # Registration settings
+  registration:
+    expires: 3600  # Registration lifetime in seconds
+    retry_interval: 60  # Retry registration every 60 seconds if failed
+    max_retries: 5
+
+  # Call handling
+  call_settings:
+    auto_answer: true
+    answer_delay: 1.0  # Delay before answering in seconds
+    max_call_duration: 1800  # 30 minutes maximum call duration
+    greeting_delay: 0.5  # Delay before sending greeting
+
+# RTP Audio Configuration
+audio:
+  # Port range for RTP audio streams
+  rtp_port_range:
+    start: 10000
+    end: 10100
+
+  # Codec settings
+  codec: "PCMU"  # G.711 μ-law (standard for 3CX)
+  sample_rate: 8000  # Telephony standard
+  frame_size: 160  # 20ms frames at 8kHz
+
+  # Audio quality settings
+  quality:
+    jitter_buffer_size: 6  # frames
+    packet_loss_tolerance: 0.05  # 5% packet loss acceptable
+    audio_level_threshold: -40  # dBFS threshold for speech detection
+
+  # Format conversion
+  conversion:
+    asr_sample_rate: 16000  # Upsampling for ASR
+    tts_sample_rate: 22050  # TTS output rate
+    enable_echo_cancellation: true
+    enable_noise_suppression: true
+
+# Voice Bot Behavior Configuration
+voice_bot:
+  # Greeting settings
+  greeting:
+    enabled: true
+    text: "Thank you for calling NETOVO. I'm Alexis, your AI assistant. How can I help you today?"
+    voice: "English-US.Female-1"
+
+  # Response behavior
+  response:
+    max_response_time: 3.0  # seconds
+    silence_timeout: 3.0    # seconds of silence before responding
+    max_tokens: 50          # LLM token limit for voice responses
+
+  # Transfer settings
+  transfer:
+    keywords: ["human", "agent", "representative", "person", "manager", "support"]
+    target_extension: "100"  # Default human agent extension
+    transfer_message: "I'll transfer you to one of our human agents who can better assist you. Please hold while I connect you."
+
+  # Session management
+  session:
+    max_conversation_time: 300  # 5 minutes before suggesting transfer
+    max_turns: 20  # Maximum conversation turns before transfer
+    frustration_threshold: 3  # Number of frustration indicators before transfer
+
+# Advanced Features
+advanced:
+  # Voice Activity Detection
+  vad:
+    enabled: true
+    aggressiveness: 2  # 0-3, higher = more aggressive
+    frame_duration: 20  # milliseconds
+    min_speech_duration: 300  # ms
+
+  # Barge-in support
+  barge_in:
+    enabled: true
+    sensitivity: 0.7  # 0-1, higher = more sensitive
+    interrupt_delay: 0.5  # seconds before interrupting TTS
+
+  # Real-time processing
+  real_time:
+    streaming_asr: false  # Enable for lower latency (requires gRPC streaming)
+    chunk_size: 320  # samples per chunk (20ms at 16kHz)
+    processing_threads: 2
+
+# Monitoring and Logging
+monitoring:
+  # Call logging
+  call_logs:
+    enabled: true
+    log_audio: false  # Security: don't log actual audio
+    log_transcripts: true
+    log_responses: true
+    retention_days: 30
+
+  # Performance metrics
+  metrics:
+    enabled: true
+    collect_latency: true
+    collect_quality_scores: true
+    quality_threshold: 4.0  # MOS score threshold
+
+  # Health monitoring
+  health_checks:
+    sip_registration: 60  # Check registration every 60 seconds
+    riva_connectivity: 30  # Check RIVA every 30 seconds
+    ollama_connectivity: 30  # Check Ollama every 30 seconds
+
+# Error Handling and Recovery
+error_handling:
+  # Retry settings
+  retry:
+    max_attempts: 3
+    initial_delay: 1.0
+    backoff_multiplier: 2.0
+    max_delay: 30.0
+
+  # Fallback behavior
+  fallback:
+    on_asr_failure: "I'm having trouble understanding you. Could you please repeat that?"
+    on_llm_failure: "I'm experiencing a technical issue. Let me transfer you to a human agent."
+    on_tts_failure: "transfer_immediately"  # Transfer without audio response
+
+  # Circuit breaker
+  circuit_breaker:
+    failure_threshold: 5  # failures before opening circuit
+    recovery_timeout: 60  # seconds before attempting recovery
+    half_open_max_calls: 3
+
+# Security Settings
+security:
+  # TLS/SRTP (if supported by 3CX)
+  encryption:
+    sip_tls: false  # Enable if 3CX supports TLS
+    srtp: false     # Enable if 3CX supports SRTP
+
+  # Authentication
+  auth:
+    digest_auth: true
+    auth_timeout: 30  # seconds
+
+  # Rate limiting
+  rate_limiting:
+    max_concurrent_calls: 10
+    calls_per_minute: 60
+
+# Development and Testing
+development:
+  # Test mode settings
+  test_mode:
+    enabled: false
+    simulate_caller: false
+    test_extensions: ["1680", "*777"]
+
+  # Debug settings
+  debug:
+    verbose_sip_logging: false
+    verbose_rtp_logging: false
+    save_audio_files: false  # For debugging audio issues
+    audio_file_path: "/tmp/voice_bot_debug/"
+
+# Network Configuration
+network:
+  # Firewall settings (documentation)
+  firewall_rules:
+    # Inbound rules needed:
+    # - TCP 5060 (SIP signaling)
+    # - UDP 10000-10100 (RTP audio)
+    # Outbound rules needed:
+    # - TCP 5060 to mtipbx.ny.3cx.us
+    # - UDP 10000-10100 to mtipbx.ny.3cx.us
+
+  # Quality of Service
+  qos:
+    enable_dscp_marking: true
+    sip_dscp: 24    # AF31
+    rtp_dscp: 46    # EF (Expedited Forwarding)
+
+  # Network interface
+  interface:
+    bind_address: "0.0.0.0"  # Bind to all interfaces
+    public_ip: null  # Auto-detect or specify for NAT scenarios
+
+# Deployment Configuration
+deployment:
+  # Service settings
+  service:
+    name: "netovo-voice-bot"
+    description: "NETOVO AI Voice Bot Telephony Service"
+    restart_policy: "always"
+
+  # Resource limits
+  resources:
+    memory_limit: "2GB"
+    cpu_limit: "2.0"
+    max_file_descriptors: 1024
+
+  # Environment
+  environment: "production"  # development, testing, production
+  region: "us-east-1"
