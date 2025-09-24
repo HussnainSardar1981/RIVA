@@ -59,25 +59,24 @@ class SimpleRivaASR:
                 # Parse output to extract transcript
                 lines = result.stdout.strip().split('\n')
 
-                # Look for transcript patterns - be more specific
+                # Look for RIVA's actual format: "Final transcripts:" followed by "0 : text"
+                in_transcripts_section = False
                 for line in lines:
-                    if 'transcript:' in line.lower():
-                        if ':' in line:
+                    if 'final transcripts:' in line.lower():
+                        in_transcripts_section = True
+                        continue
+
+                    if in_transcripts_section and line.strip():
+                        # Look for format "0 : actual transcript text"
+                        if ':' in line and (line.strip().startswith('0 :') or line.strip().startswith('1 :')):
+                            # Extract text after "0 :" or "1 :"
                             text = line.split(':', 1)[1].strip().strip('"')
                             if text and len(text) > 1 and not text.startswith('Throughput'):
-                                logger.info("ASR successful", transcript=text)
+                                logger.info("ASR final transcript found", transcript=text)
                                 return text
-
-                # Look for final transcript patterns
-                for line in lines:
-                    if 'final' in line.lower() and 'transcript' in line.lower():
-                        # Extract text after "final transcript:" or similar
-                        parts = line.lower().split('transcript')
-                        if len(parts) > 1:
-                            text = parts[1].split(':', 1)[-1].strip().strip('"')
-                            if text and len(text) > 1 and not text.startswith('Throughput'):
-                                logger.info("ASR final transcript", transcript=text)
-                                return text
+                        # Stop if we hit a separator or new section
+                        if '---' in line or 'Timestamps:' in line:
+                            break
 
                 # Look for quoted text that looks like speech
                 for line in lines:
