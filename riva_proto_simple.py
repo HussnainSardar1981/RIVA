@@ -20,7 +20,7 @@ class SimpleRivaASR:
         self.server_url = server_url
         self.container = container
 
-    def transcribe_file(self, audio_file: str) -> str:
+    def transcribe_file(self, audio_file: str, automatic_punctuation: bool = True) -> str:
         """Transcribe audio file using Riva CLI client in Docker"""
         try:
             # Copy audio file into container
@@ -34,14 +34,19 @@ class SimpleRivaASR:
                 logger.error("Failed to copy audio to container", error=copy_result.stderr)
                 return "File copy error"
 
-            # Run ASR client inside container
+            # Run ASR client inside container with offline conformer
             cmd = [
                 "sudo", "docker", "exec", self.container,
                 "/opt/riva/clients/riva_streaming_asr_client",
                 f"--riva_uri={self.server_url}",
                 f"--audio_file={container_path}",
-                "--simulate_realtime=false"
+                "--simulate_realtime=false",
+                "--offline_conformer=true"
             ]
+
+            # Add automatic punctuation control
+            if not automatic_punctuation:
+                cmd.append("--automatic_punctuation=false")
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
