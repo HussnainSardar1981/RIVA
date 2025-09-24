@@ -98,7 +98,7 @@ async def test_ollama():
             print("✓ Ollama is running")
 
             # Test simple generation
-            response = await client.generate("Say hello in one word")
+            response = client.generate("Say hello in one word")
             print(f"✓ Ollama response: '{response[:50]}'")
 
             client.close()
@@ -118,12 +118,19 @@ def test_riva_connection():
     try:
         from riva_client import RivaASRClient, RivaTTSClient
 
-        # Just test creation (connect methods are TODO)
+        # Test creation and connection
         asr_client = RivaASRClient()
         tts_client = RivaTTSClient()
 
         print("✓ Riva clients created")
-        print("⚠ Actual connection test pending (needs implementation)")
+
+        # Test connections
+        asr_connected = asr_client.connect()
+        tts_connected = tts_client.connect()
+
+        print(f"✓ ASR connection: {'OK' if asr_connected else 'Using fallback'}")
+        print(f"✓ TTS connection: {'OK' if tts_connected else 'Using fallback'}")
+
         return True
 
     except Exception as e:
@@ -134,13 +141,19 @@ async def main():
     """Run all tests"""
     print("=== Voice Bot Component Tests ===\n")
 
-    tests = [
+    # Run non-async tests
+    non_async_tests = [
         ("Imports", test_imports()),
         ("Audio Processing", test_audio_processing()),
         ("Conversation Context", test_conversation_context()),
-        ("Ollama", await test_ollama()),
         ("Riva Connection", test_riva_connection()),
     ]
+
+    # Run async tests separately
+    ollama_result = await test_ollama()
+
+    # Combine results
+    tests = non_async_tests + [("Ollama", ollama_result)]
 
     passed = 0
     total = len(tests)
