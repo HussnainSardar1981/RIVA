@@ -1,9 +1,10 @@
 """
 Fixed Ollama client for ORCA2:7b LLM
-Connects to local Ollama on localhost:11434
+Properly handles both sync and async operations
 """
 
 import httpx
+import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
 import structlog
 from typing import Optional
@@ -16,12 +17,13 @@ class OllamaClient:
     def __init__(self, base_url="http://localhost:11434", model="orca2:7b"):
         self.base_url = base_url
         self.model = model
-        # Use synchronous client for both sync and async methods
-        self.client = httpx.Client(base_url=base_url, timeout=30.0)
+        # Keep both sync and async clients
+        self.sync_client = httpx.Client(base_url=base_url, timeout=30.0)
+        self.async_client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
     async def generate(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 100) -> str:
-        """Generate response from Ollama"""
+        """Generate response from Ollama (async version)"""
 
         # Build the full prompt
         full_prompt = prompt
@@ -40,25 +42,25 @@ class OllamaClient:
         }
 
         try:
-            logger.info("Sending request to Ollama", prompt=prompt[:50], model=self.model)
-            response = self.client.post("/api/generate", json=payload)
+            logger.info("Sending async request to Ollama", prompt=prompt[:50], model=self.model)
+            response = await self.async_client.post("/api/generate", json=payload)
             response.raise_for_status()
 
             result = response.json()
             generated_text = result.get("response", "").strip()
 
-            logger.info("Received response from Ollama", response=generated_text[:50])
+            logger.info("Received async response from Ollama", response=generated_text[:50])
             return generated_text
 
         except Exception as e:
-            logger.error("Ollama request failed", error=str(e))
+            logger.error("Ollama async request failed", error=str(e))
             raise
 
     def health_check(self) -> bool:
-        """Check if Ollama is running"""
+        """Check if Ollama is running (sync version)"""
         try:
             logger.info("Checking Ollama health", url=self.base_url)
-            response = self.client.get("/api/tags")
+            response = self.sync_client.get("/api/tags")
             
             if response.status_code == 200:
                 tags_data = response.json()
@@ -87,10 +89,16 @@ class OllamaClient:
             logger.error("Ollama health check error", error=str(e))
             return False
 
+    async def generate_sync(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 100) -> str:
+        """Synchronous wrapper for generate method"""
+        return await self.generate(prompt, system_prompt, max_tokens)
+
     def close(self):
-        """Close the HTTP client"""
-        if self.client:
-            self.client.close()
+        """Close both HTTP clients"""
+        if self.sync_client:
+            self.sync_client.close()
+        if self.async_client:
+            asyncio.create_task(self.async_client.aclose())
 
 # Default system prompt for voice bot
 VOICE_BOT_SYSTEM_PROMPT = """You are Alexis, a professional customer support AI voice assistant for NETOVO.
