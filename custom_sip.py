@@ -34,11 +34,12 @@ class CustomSIPClient:
         self.port = config.get('port', 5060)
         self.username = config.get('username', '1600')
         self.password = config.get('password')
+        self.auth_username = config.get('auth_username', self.username)
         self.display_name = config.get('display_name', 'NETOVO AI Voice Bot')
 
         # Local settings
         self.local_ip = self._get_local_ip()
-        self.local_port = 5060
+        self.local_port = config.get('local_port', 5061)
         self.socket = None
 
         # State management
@@ -309,7 +310,7 @@ class CustomSIPClient:
     def _create_digest_response(self, method: str, uri: str) -> str:
         """Create digest authentication response"""
         try:
-            ha1 = hashlib.md5(f"{self.username}:{self.auth_realm}:{self.password}".encode()).hexdigest()
+            ha1 = hashlib.md5(f"{self.auth_username}:{self.auth_realm}:{self.password}".encode()).hexdigest()
             ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
             response = hashlib.md5(f"{ha1}:{self.auth_nonce}:{ha2}".encode()).hexdigest()
             return response
@@ -527,3 +528,4 @@ a=sendrecv
 
         except Exception as e:
             logger.error("Error stopping SIP client", error=str(e))
+
