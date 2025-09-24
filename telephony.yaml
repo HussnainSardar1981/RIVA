@@ -1,12 +1,14 @@
 # NETOVO AI Voice Bot - Telephony Configuration
 # 3CX Integration Settings for Production Deployment
 
-# SIP Server Configuration
+# SIP Server Configuration (Sardar's 3CX Assignment)
 sip:
+  local_port: 5061  # Local binding port (voice bot)
   server: "mtipbx.ny.3cx.us"
   port: 5060
   username: "1600"
-  password: "${THREECX_PASSWORD}"  # From environment variable
+  password: "FcHw0P2FHK"
+  auth_username: "qpZh2VS624"  # Authentication ID from 3CX
   display_name: "NETOVO AI Voice Bot"
   domain: "mtipbx.ny.3cx.us"
 
@@ -25,10 +27,10 @@ sip:
 
 # RTP Audio Configuration
 audio:
-  # Port range for RTP audio streams
+  # Port range for RTP audio streams (assigned by 3CX)
   rtp_port_range:
-    start: 10000
-    end: 10100
+    start: 9000
+    end: 10999
 
   # Codec settings
   codec: "PCMU"  # G.711 μ-law (standard for 3CX)
