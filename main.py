@@ -97,7 +97,7 @@ class VoiceBot:
             # Step 3: Test Ollama generation
             logger.info("Testing Ollama generation...")
             try:
-                test_response = await self.ollama.generate("Hello", max_tokens=5)
+                test_response = self.ollama.generate("Hello", max_tokens=5)
                 logger.info("Ollama generation test successful", response=test_response[:50])
             except Exception as gen_error:
                 logger.error("Ollama generation test failed", error=str(gen_error))
@@ -157,19 +157,19 @@ class VoiceBot:
         """Get response from Ollama LLM"""
         try:
             # Simple approach: just use transcript with system prompt
-            response = await self.ollama.generate(
+            response = self.ollama.generate(
                 prompt=transcript,
                 system_prompt=VOICE_BOT_SYSTEM_PROMPT,
                 max_tokens=50
             )
-
+    
             # Add to conversation history
             self.conversation.add_turn(transcript, response)
-
+    
             logger.info("LLM response generated",
                        input=transcript[:50],
                        output=response[:50])
-
+    
             return response
 
         except Exception as e:
@@ -205,7 +205,7 @@ class VoiceBot:
                 os.unlink(tts_file)
                 if response_file:
                     os.unlink(response_file)
-            except Exception:
+            except:
                 pass
 
             logger.info("Complete pipeline successful",
