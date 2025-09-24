@@ -162,14 +162,14 @@ class VoiceBot:
                 system_prompt=VOICE_BOT_SYSTEM_PROMPT,
                 max_tokens=50
             )
-    
+
             # Add to conversation history
             self.conversation.add_turn(transcript, response)
-    
+
             logger.info("LLM response generated",
                        input=transcript[:50],
                        output=response[:50])
-    
+
             return response
 
         except Exception as e:
@@ -205,7 +205,7 @@ class VoiceBot:
                 os.unlink(tts_file)
                 if response_file:
                     os.unlink(response_file)
-            except:
+            except Exception:
                 pass
 
             logger.info("Complete pipeline successful",
