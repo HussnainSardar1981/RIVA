@@ -58,21 +58,41 @@ class SimpleRivaASR:
             if result.returncode == 0:
                 # Parse output to extract transcript
                 lines = result.stdout.strip().split('\n')
+
+                # Look for transcript patterns - be more specific
                 for line in lines:
-                    # Look for transcript patterns
-                    if 'transcript:' in line.lower() or 'final' in line.lower():
+                    if 'transcript:' in line.lower():
                         if ':' in line:
                             text = line.split(':', 1)[1].strip().strip('"')
-                            if text and len(text) > 1:
+                            if text and len(text) > 1 and not text.startswith('Throughput'):
                                 logger.info("ASR successful", transcript=text)
                                 return text
 
-                # Fallback: return meaningful content
-                for line in reversed(lines):
-                    if line.strip() and not line.startswith('[') and len(line.strip()) > 3:
-                        text = line.strip().strip('"')
-                        logger.info("ASR fallback", transcript=text)
-                        return text
+                # Look for final transcript patterns
+                for line in lines:
+                    if 'final' in line.lower() and 'transcript' in line.lower():
+                        # Extract text after "final transcript:" or similar
+                        parts = line.lower().split('transcript')
+                        if len(parts) > 1:
+                            text = parts[1].split(':', 1)[-1].strip().strip('"')
+                            if text and len(text) > 1 and not text.startswith('Throughput'):
+                                logger.info("ASR final transcript", transcript=text)
+                                return text
+
+                # Look for quoted text that looks like speech
+                for line in lines:
+                    if '"' in line and not 'Throughput' in line and not 'RTFX' in line:
+                        # Extract quoted text
+                        import re
+                        quotes = re.findall(r'"([^"]*)"', line)
+                        for quote in quotes:
+                            if quote.strip() and len(quote.strip()) > 2:
+                                logger.info("ASR quoted text", transcript=quote.strip())
+                                return quote.strip()
+
+                # Log the full output for debugging
+                logger.error("No valid transcript found in ASR output",
+                            stdout_lines=lines[:5])  # First 5 lines
 
             logger.error("ASR failed", stdout=result.stdout, stderr=result.stderr)
             return "Speech not understood"
