@@ -19,13 +19,12 @@ def test_imports():
 
     modules = [
         ('telephony.rtp_bridge', 'RTPAudioBridge'),
-        ('telephony.sip_client', 'SIPCallHandler'),
+        ('telephony.custom_sip', 'CustomSIPClient'),
         ('telephony.call_manager', 'CallFlowManager'),
         ('telephony.audio_codec', 'AudioCodec'),
         ('telephony.advanced_vad', 'AdvancedVAD'),
         ('yaml', None),
         ('aiortc', None),
-        ('aiosip', None),
     ]
 
     passed = 0
@@ -166,7 +165,7 @@ def test_directory_structure():
         'config/telephony.yaml',
         'telephony/__init__.py',
         'telephony/rtp_bridge.py',
-        'telephony/sip_client.py',
+        'telephony/custom_sip.py',
         'telephony/call_manager.py',
         'telephony/audio_codec.py',
         'telephony/advanced_vad.py',
