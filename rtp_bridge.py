@@ -115,7 +115,7 @@ class RTPAudioBridge:
         @self.peer_connection.on("connectionstatechange")
         async def on_connection_state_change():
             """Handle connection state changes"""
-            state = self.peer_connection.connectionState
+            state = self.peer_connection.connectionState if self.peer_connection else "not_initialized"
             logger.info("RTP connection state changed", state=state)
 
             if state == "connected":
