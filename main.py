@@ -1,6 +1,6 @@
 """
 NETOVO Professional Voice Bot Application
-Production-ready version with proper error handling and configuration
+Production-ready version with proper error handling and realistic testing
 """
 
 import asyncio
@@ -8,7 +8,9 @@ import os
 import signal
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+import tempfile
+import time
 
 import structlog
 from dotenv import load_dotenv
@@ -72,6 +74,54 @@ class VoiceBotConfig:
         if not self.riva_server:
             raise ValueError("RIVA_SERVER is required")
 
+class TestResult:
+    """Detailed test result with validation"""
+
+    def __init__(self, test_name: str):
+        self.test_name = test_name
+        self.start_time = time.time()
+        self.end_time = None
+        self.steps = {}
+        self.passed = False
+        self.error_message = ""
+        self.details = {}
+
+    def add_step(self, step_name: str, success: bool, details: str = ""):
+        """Add a test step result"""
+        self.steps[step_name] = {
+            "success": success,
+            "details": details,
+            "timestamp": time.time()
+        }
+
+    def finish(self, passed: bool, error_message: str = ""):
+        """Mark test as complete"""
+        self.end_time = time.time()
+        self.passed = passed
+        self.error_message = error_message
+
+    def duration(self) -> float:
+        """Get test duration in seconds"""
+        if self.end_time:
+            return self.end_time - self.start_time
+        return time.time() - self.start_time
+
+    def summary(self) -> str:
+        """Get test summary"""
+        status = "✅ PASSED" if self.passed else "❌ FAILED"
+        duration = f"{self.duration():.2f}s"
+
+        if not self.passed and self.error_message:
+            return f"{status} ({duration}) - {self.error_message}"
+
+        step_summary = []
+        for step, result in self.steps.items():
+            step_status = "✓" if result["success"] else "✗"
+            step_summary.append(f"{step_status} {step}")
+
+        steps_str = " | ".join(step_summary) if step_summary else "No steps"
+        return f"{status} ({duration}) - {steps_str}"
+
 class VoiceBot:
     """Main Voice Bot orchestrator with production-ready implementation"""
 
@@ -86,6 +136,9 @@ class VoiceBot:
         self.riva_tts: Optional[SimpleRivaTTS] = None
         self.audio_processor: Optional[AudioProcessor] = None
         self.conversation: Optional[ConversationContext] = None
+
+        # Track temp files for cleanup
+        self.temp_files = set()
 
         logger.info("VoiceBot constructor completed", config=self._config_summary())
 
@@ -194,6 +247,8 @@ class VoiceBot:
             wav_path = self.riva_tts.synthesize(text)
 
             if wav_path and os.path.exists(wav_path):
+                # Track temp file for cleanup
+                self.temp_files.add(wav_path)
                 logger.info("TTS completed successfully", output=wav_path)
                 return wav_path
             else:
@@ -208,27 +263,27 @@ class VoiceBot:
         """Convert speech file to text"""
         if not audio_file or not os.path.exists(audio_file):
             logger.error("Audio file does not exist", file=audio_file)
-            return "Audio file not found"
+            return ""
 
         try:
             logger.info("Processing ASR", file=audio_file)
             transcript = self.riva_asr.transcribe_file(audio_file)
 
-            if transcript:
+            if transcript and transcript.strip():
                 logger.info("ASR completed successfully", transcript=transcript[:100])
-                return transcript
+                return transcript.strip()
             else:
                 logger.warning("ASR returned empty transcript")
-                return "No speech detected"
+                return ""
 
         except Exception as e:
             logger.error("ASR processing failed", error=str(e))
-            return "Speech processing error"
+            return ""
 
     async def get_llm_response(self, transcript: str) -> str:
         """Get response from Ollama LLM"""
         if not transcript.strip():
-            return "I didn't hear anything. Could you please repeat?"
+            return ""
 
         try:
             logger.info("Generating LLM response", input=transcript[:100])
@@ -239,75 +294,186 @@ class VoiceBot:
                 max_tokens=self.config.max_tokens
             )
 
-            if response:
+            if response and response.strip():
                 # Add to conversation history
                 self.conversation.add_turn(transcript, response)
                 logger.info("LLM response generated successfully",
                            input_length=len(transcript),
                            output_length=len(response))
-                return response
+                return response.strip()
             else:
                 logger.warning("LLM returned empty response")
-                return "I'm processing your request. Please wait a moment."
+                return ""
 
         except Exception as e:
             logger.error("LLM processing failed", error=str(e))
-            return "I'm sorry, I'm having trouble processing your request. Please try again."
+            return ""
 
-    async def process_complete_pipeline(self, input_text: str) -> str:
-        """Complete pipeline: Text -> TTS -> ASR -> LLM -> TTS"""
+    async def validate_complete_pipeline(self, input_text: str) -> TestResult:
+        """Run complete pipeline with detailed validation"""
+        test_result = TestResult(f"Pipeline Test: {input_text[:50]}...")
+
         if not input_text.strip():
-            return "No input provided"
+            test_result.finish(False, "No input provided")
+            return test_result
 
-        logger.info("Starting complete pipeline", input=input_text[:100])
-        temp_files = []
+        logger.info("Starting validated pipeline test", input=input_text[:100])
 
         try:
-            # Step 1: Convert input text to speech
+            # Step 1: Text to Speech
             logger.info("Pipeline Step 1: Text to Speech")
             tts_file = await self.process_text_to_speech(input_text)
-            if not tts_file:
-                return "TTS generation failed"
-            temp_files.append(tts_file)
 
-            # Step 2: Convert speech back to text (simulating phone input)
+            if not tts_file or not os.path.exists(tts_file):
+                test_result.add_step("TTS", False, "No output file generated")
+                test_result.finish(False, "TTS generation failed")
+                return test_result
+
+            # Validate TTS file
+            try:
+                file_size = os.path.getsize(tts_file)
+                if file_size < 1000:  # Less than 1KB indicates failure
+                    test_result.add_step("TTS", False, f"File too small: {file_size} bytes")
+                    test_result.finish(False, "TTS file too small")
+                    return test_result
+                test_result.add_step("TTS", True, f"Generated {file_size} bytes")
+            except Exception as e:
+                test_result.add_step("TTS", False, f"File validation error: {e}")
+                test_result.finish(False, "TTS file validation failed")
+                return test_result
+
+            # Step 2: Speech to Text
             logger.info("Pipeline Step 2: Speech to Text")
             transcript = await self.process_speech_to_text(tts_file)
 
-            # Step 3: Get LLM response
+            if not transcript:
+                test_result.add_step("ASR", False, "Empty transcript")
+                test_result.finish(False, "ASR returned empty transcript")
+                return test_result
+
+            # Validate transcript similarity (basic check)
+            input_words = set(input_text.lower().split())
+            transcript_words = set(transcript.lower().split())
+            common_words = input_words.intersection(transcript_words)
+            similarity = len(common_words) / max(len(input_words), 1)
+
+            if similarity < 0.3:  # Less than 30% word overlap
+                test_result.add_step("ASR", False, f"Low similarity: {similarity:.2%}")
+                test_result.finish(False, f"ASR transcript too different from input")
+                return test_result
+
+            test_result.add_step("ASR", True, f"Transcript: '{transcript[:50]}...' (similarity: {similarity:.2%})")
+
+            # Step 3: LLM Processing
             logger.info("Pipeline Step 3: LLM Processing")
-            response = await self.get_llm_response(transcript)
+            llm_response = await self.get_llm_response(transcript)
 
-            # Step 4: Convert response to speech
+            if not llm_response:
+                test_result.add_step("LLM", False, "Empty response")
+                test_result.finish(False, "LLM returned empty response")
+                return test_result
+
+            # Validate LLM response quality
+            if len(llm_response) < 5:
+                test_result.add_step("LLM", False, "Response too short")
+                test_result.finish(False, "LLM response too short")
+                return test_result
+
+            test_result.add_step("LLM", True, f"Response: '{llm_response[:50]}...'")
+
+            # Step 4: Response to Speech
             logger.info("Pipeline Step 4: Response to Speech")
-            response_file = await self.process_text_to_speech(response)
-            if response_file:
-                temp_files.append(response_file)
+            response_file = await self.process_text_to_speech(llm_response)
 
-            logger.info("Complete pipeline successful",
-                       original=input_text[:50],
+            if not response_file or not os.path.exists(response_file):
+                test_result.add_step("Response TTS", False, "No output file generated")
+                test_result.finish(False, "Response TTS failed")
+                return test_result
+
+            # Validate response TTS file
+            try:
+                response_file_size = os.path.getsize(response_file)
+                if response_file_size < 1000:
+                    test_result.add_step("Response TTS", False, f"File too small: {response_file_size} bytes")
+                    test_result.finish(False, "Response TTS file too small")
+                    return test_result
+                test_result.add_step("Response TTS", True, f"Generated {response_file_size} bytes")
+            except Exception as e:
+                test_result.add_step("Response TTS", False, f"File validation error: {e}")
+                test_result.finish(False, "Response TTS file validation failed")
+                return test_result
+
+            # All steps passed
+            test_result.details = {
+                "input": input_text,
+                "transcript": transcript,
+                "llm_response": llm_response,
+                "similarity": similarity,
+                "tts_file_size": file_size,
+                "response_file_size": response_file_size
+            }
+
+            test_result.finish(True)
+            logger.info("Complete pipeline validation successful",
+                       input=input_text[:50],
                        transcript=transcript[:50],
-                       response=response[:50])
+                       response=llm_response[:50])
 
-            return response_file if response_file else response
+        except Exception as e:
+            logger.error("Pipeline validation failed", error=str(e))
+            test_result.finish(False, f"Exception: {str(e)}")
+
+        return test_result
+
+    async def process_complete_pipeline(self, input_text: str) -> str:
+        """Simple pipeline for interactive use"""
+        if not input_text.strip():
+            return "No input provided"
+
+        try:
+            # Step 1: Text to Speech
+            tts_file = await self.process_text_to_speech(input_text)
+            if not tts_file:
+                return "TTS generation failed"
+
+            # Step 2: Speech to Text
+            transcript = await self.process_speech_to_text(tts_file)
+            if not transcript:
+                return "Speech recognition failed"
+
+            # Step 3: LLM Response
+            response = await self.get_llm_response(transcript)
+            if not response:
+                return "Language model failed to respond"
+
+            # Step 4: Response to Speech
+            response_file = await self.process_text_to_speech(response)
+
+            return response
 
         except Exception as e:
             logger.error("Pipeline processing failed", error=str(e))
-            return "Pipeline error occurred"
+            return f"Pipeline error: {str(e)}"
 
-        finally:
-            # Cleanup temp files
-            self._cleanup_temp_files(temp_files)
+    def _cleanup_temp_files(self):
+        """Clean up temporary files with better error handling"""
+        cleaned = 0
+        failed = 0
 
-    def _cleanup_temp_files(self, temp_files: list):
-        """Clean up temporary files"""
-        for temp_file in temp_files:
+        for temp_file in list(self.temp_files):
             try:
                 if temp_file and os.path.exists(temp_file):
+                    os.chmod(temp_file, 0o666)  # Try to make it writable
                     os.unlink(temp_file)
+                    self.temp_files.discard(temp_file)
+                    cleaned += 1
                     logger.debug("Cleaned up temp file", file=temp_file)
             except Exception as e:
-                logger.warning("Failed to cleanup temp file", file=temp_file, error=str(e))
+                failed += 1
+                logger.debug("Failed to cleanup temp file", file=temp_file, error=str(e))
+
+        if cleaned > 0 or failed > 0:
+            logger.info("Temp file cleanup", cleaned=cleaned, failed=failed)
 
     async def start_interactive_mode(self):
         """Start interactive voice bot mode"""
@@ -340,8 +506,8 @@ class VoiceBot:
                 print(f"❌ Error: {e}")
 
     async def run_tests(self):
-        """Run comprehensive tests"""
-        logger.info("Running Voice Bot Tests")
+        """Run comprehensive tests with detailed validation"""
+        logger.info("Running Voice Bot Tests with detailed validation")
 
         test_cases = [
             "Hello, this is a test of the voice bot system",
@@ -350,30 +516,48 @@ class VoiceBot:
             "Thank you for your help"
         ]
 
-        print(f"\n🧪 Running {len(test_cases)} test cases...\n")
+        print(f"\n🧪 Running {len(test_cases)} comprehensive test cases...\n")
 
         passed = 0
         failed = 0
+        results = []
 
         for i, test_text in enumerate(test_cases, 1):
             print(f"Test {i}/{len(test_cases)}: {test_text}")
+            print("🔄 Running detailed validation...")
 
             try:
-                result = await self.process_complete_pipeline(test_text)
-                if result and "error" not in result.lower():
-                    print(f"✅ PASSED: {result}")
+                test_result = await self.validate_complete_pipeline(test_text)
+                results.append(test_result)
+
+                print(f"   {test_result.summary()}")
+
+                if test_result.passed:
                     passed += 1
                 else:
-                    print(f"❌ FAILED: {result}")
                     failed += 1
+
             except Exception as e:
-                print(f"❌ ERROR: {e}")
                 failed += 1
+                print(f"   ❌ EXCEPTION: {e}")
+                logger.error("Test case failed with exception", test=test_text, error=str(e))
 
             print()
 
-        print(f"📊 Test Results: {passed} passed, {failed} failed")
-        logger.info("Test run completed", passed=passed, failed=failed)
+        # Clean up temp files after tests
+        self._cleanup_temp_files()
+
+        print(f"📊 Final Test Results: {passed} passed, {failed} failed")
+        print(f"⏱️  Total test duration: {sum(r.duration() for r in results):.2f}s")
+
+        # Show detailed breakdown
+        if failed > 0:
+            print("\n❌ Failed Tests Details:")
+            for result in results:
+                if not result.passed:
+                    print(f"   • {result.test_name}: {result.error_message}")
+
+        logger.info("Test run completed", passed=passed, failed=failed, total_duration=sum(r.duration() for r in results))
 
     async def start_server(self):
         """Start the voice bot server"""
@@ -383,7 +567,7 @@ class VoiceBot:
         print(f"\n🎯 NETOVO Voice Bot v1.0")
         print("=" * 50)
         print("1. Interactive Mode")
-        print("2. Run Tests")
+        print("2. Run Comprehensive Tests")
         print("3. Exit")
         print("=" * 50)
 
@@ -404,10 +588,16 @@ class VoiceBot:
         except Exception as e:
             logger.error("Server error", error=str(e))
             print(f"❌ Server error: {e}")
+        finally:
+            # Always clean up temp files on exit
+            self._cleanup_temp_files()
 
     async def cleanup(self):
         """Clean up resources"""
         logger.info("Cleaning up resources...")
+
+        # Clean up temp files
+        self._cleanup_temp_files()
 
         if self.ollama:
             try:
@@ -416,7 +606,6 @@ class VoiceBot:
             except Exception as e:
                 logger.warning("Error closing Ollama client", error=str(e))
 
-        # Additional cleanup for other components could go here
         logger.info("Resource cleanup completed")
 
     async def shutdown(self):
