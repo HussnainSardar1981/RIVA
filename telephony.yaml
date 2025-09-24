@@ -168,8 +168,8 @@ development:
 
   # Debug settings
   debug:
-    verbose_sip_logging: false
-    verbose_rtp_logging: false
+    verbose_sip_logging: true
+    verbose_rtp_logging: true
     save_audio_files: false  # For debugging audio issues
     audio_file_path: "/tmp/voice_bot_debug/"
 
