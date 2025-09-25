@@ -8,6 +8,7 @@ import sys
 import os
 import tempfile
 from pathlib import Path
+from shutil import copyfile
 
 # Add parent directory for imports
 parent_dir = Path(__file__).parent.parent
@@ -94,6 +95,32 @@ class NetovoRivaVoiceBot:
         self.riva_asr = None
         self.ollama_client = None
 
+        # Asterisk sounds directory
+        self.sounds_dir = "/var/lib/asterisk/sounds/custom"
+
+    def _play_wav_file(self, wav_path):
+        """Copy WAV file to Asterisk sounds directory and play it"""
+        try:
+            # Create sounds directory if it doesn't exist
+            os.makedirs(self.sounds_dir, exist_ok=True)
+
+            # Get basename without extension
+            base_name = os.path.splitext(os.path.basename(wav_path))[0]
+            dst_path = os.path.join(self.sounds_dir, f"{base_name}.wav")
+
+            # Copy file to sounds directory
+            copyfile(wav_path, dst_path)
+
+            # Set proper permissions
+            os.chmod(dst_path, 0o644)
+
+            # Play file (Asterisk expects path relative to sounds dir, no extension)
+            return self.agi.stream_file(f"custom/{base_name}")
+
+        except Exception as e:
+            self.agi.verbose(f"Error playing WAV file: {str(e)}")
+            return "ERROR"
+
     def initialize_components(self):
         """Initialize RIVA and Ollama"""
         try:
@@ -135,18 +162,18 @@ class NetovoRivaVoiceBot:
             )
 
             if tts_file and os.path.exists(tts_file):
-                # Play greeting
-                base_file = tts_file.replace('.wav', '')
-                result = self.agi.stream_file(base_file)
-                self.agi.verbose("RIVA TTS greeting played successfully")
+                # Play greeting using proper audio handler
+                result = self._play_wav_file(tts_file)
+                if result != "ERROR":
+                    self.agi.verbose("RIVA TTS greeting played successfully")
 
-                # Cleanup
+                # Cleanup original temp file
                 try:
                     os.unlink(tts_file)
                 except:
                     pass
 
-                return True
+                return result != "ERROR"
             else:
                 self.agi.verbose("TTS generation failed")
                 return False
@@ -166,21 +193,32 @@ class NetovoRivaVoiceBot:
 
             # Initialize components
             if not self.initialize_components():
-                self.agi.verbose("Using fallback mode")
+                self.agi.verbose("Using fallback mode - playing demo message")
                 self.agi.stream_file("demo-thanks")
+                # Keep call alive for a bit so caller can hear the message
+                import time
+                time.sleep(3)
+                self.agi.hangup()
                 return
 
             # Send RIVA TTS greeting
             if not self.send_tts_greeting():
-                self.agi.verbose("TTS failed, using fallback")
+                self.agi.verbose("TTS failed, using fallback greeting")
                 self.agi.stream_file("hello")
 
-            # Simple completion message
-            self.agi.verbose("NETOVO Voice Bot call completed successfully")
+            # TODO: Add conversation loop here
+            # For now, keep call alive for 10 seconds to demonstrate working audio
+            self.agi.verbose("NETOVO Voice Bot greeting completed - keeping call alive")
+            import time
+            time.sleep(10)
+
+            # Graceful hangup after demo period
+            self.agi.verbose("Demo period complete - hanging up call")
+            self.agi.hangup()
 
         except Exception as e:
             self.agi.verbose(f"Call handling error: {str(e)}")
-        finally:
+            # Only hangup on error
             self.agi.hangup()
 
 def main():
@@ -199,3 +237,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+    
