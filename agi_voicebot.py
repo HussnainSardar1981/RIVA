@@ -155,15 +155,14 @@ class NetovoAGIVoiceBot:
             return False
 
     async def handle_call(self):
-        """Main call handling logic"""
+        """Main call handling logic - call already answered in main()"""
         try:
             logger.info("Handling incoming call",
                        caller_id=self.caller_id,
                        extension=self.extension)
 
-            # Answer the call
-            self.agi.verbose(f"NETOVO Voice Bot answering call from {self.caller_id}")
-            self.agi.answer()
+            # Call is already answered in main() - skip duplicate answer
+            self.agi.verbose(f"NETOVO Voice Bot ready for call from {self.caller_id}")
 
             # Send greeting
             await self.send_greeting()
@@ -410,11 +409,21 @@ async def main():
 
         logger.info("Starting NETOVO Voice Bot AGI Script")
 
-        # Create and initialize voice bot
+        # Create voice bot instance
         voice_bot = NetovoAGIVoiceBot()
 
+        # CRITICAL: Answer the call IMMEDIATELY to prevent timeout
+        voice_bot.agi.verbose("NETOVO Voice Bot answering call...")
+        voice_bot.agi.answer()
+        voice_bot.agi.verbose("Call answered, initializing voice bot components...")
+
+        # Now initialize components after answering
         if not await voice_bot.initialize():
+            voice_bot.agi.verbose("Voice bot initialization failed")
+            # Play error message before hanging up
+            voice_bot.agi.stream_file("demo-unavail")
             logger.error("Voice bot initialization failed")
+            voice_bot.agi.hangup()
             sys.exit(1)
 
         # Handle the call
