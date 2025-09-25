@@ -14,6 +14,18 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import structlog
 
+# CRITICAL: Check if we're in AGI environment FIRST
+if sys.stdin.isatty():
+    print("ERROR: This script must be called from Asterisk AGI", file=sys.stderr)
+    sys.exit(0)
+
+# Use pyst2 AGI library (like working.py)
+try:
+    from asterisk.agi import AGI
+except ImportError:
+    print("ERROR: pyst2 module not found", file=sys.stderr)
+    sys.exit(0)
+
 # Add parent directory to path for imports
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
@@ -25,70 +37,19 @@ from conversation_context import ConversationContext
 
 logger = structlog.get_logger()
 
-class AGIInterface:
-    """Simple AGI interface for Asterisk communication"""
-
-    def __init__(self):
-        self.env = {}
-        self._parse_agi_environment()
-
-    def _parse_agi_environment(self):
-        """Parse AGI environment variables from stdin"""
-        while True:
-            line = sys.stdin.readline().strip()
-            if not line:
-                break
-            if ':' in line:
-                key, value = line.split(':', 1)
-                self.env[key.strip()] = value.strip()
-
-        logger.info("AGI Environment parsed", env=self.env)
-
-    def execute(self, command: str) -> str:
-        """Execute AGI command and return result"""
-        sys.stdout.write(f"{command}\n")
-        sys.stdout.flush()
-
-        result = sys.stdin.readline().strip()
-        logger.debug("AGI Command executed", command=command, result=result)
-        return result
-
-    def answer(self):
-        """Answer the call"""
-        return self.execute("ANSWER")
-
-    def hangup(self):
-        """Hang up the call"""
-        return self.execute("HANGUP")
-
-    def stream_file(self, filename: str, escape_digits: str = ""):
-        """Stream audio file to caller"""
-        return self.execute(f'STREAM FILE "{filename}" "{escape_digits}"')
-
-    def record_file(self, filename: str, format: str = "wav", escape_digits: str = "#", timeout: int = 10000):
-        """Record audio from caller"""
-        return self.execute(f'RECORD FILE "{filename}" "{format}" "{escape_digits}" {timeout}')
-
-    def get_variable(self, variable: str) -> str:
-        """Get channel variable"""
-        result = self.execute(f'GET VARIABLE "{variable}"')
-        if result.startswith("200 result=1"):
-            return result.split('(')[1].split(')')[0]
-        return ""
-
-    def set_variable(self, variable: str, value: str):
-        """Set channel variable"""
-        return self.execute(f'SET VARIABLE "{variable}" "{value}"')
-
-    def verbose(self, message: str, level: int = 1):
-        """Send verbose message to Asterisk"""
-        return self.execute(f'VERBOSE "{message}" {level}')
+# Using pyst2 AGI library instead of custom AGI class
 
 class NetovoAGIVoiceBot:
     """NETOVO Voice Bot AGI Handler"""
 
     def __init__(self):
-        self.agi = AGIInterface()
+        # Use pyst2 AGI library (like working.py)
+        self.agi = AGI()
+
+        # ANSWER IMMEDIATELY (your working pattern)
+        self.agi.answer()
+        self.agi.verbose("NETOVO Voice Bot answered call", 1)
+
         self.config = self._load_config()
 
         # Initialize components
@@ -409,13 +370,10 @@ async def main():
 
         logger.info("Starting NETOVO Voice Bot AGI Script")
 
-        # Create voice bot instance
+        # Create voice bot instance (already answers call in __init__)
         voice_bot = NetovoAGIVoiceBot()
 
-        # CRITICAL: Answer the call IMMEDIATELY to prevent timeout
-        voice_bot.agi.verbose("NETOVO Voice Bot answering call...")
-        voice_bot.agi.answer()
-        voice_bot.agi.verbose("Call answered, initializing voice bot components...")
+        voice_bot.agi.verbose("Call answered, initializing voice bot components...", 1)
 
         # Now initialize components after answering
         if not await voice_bot.initialize():
