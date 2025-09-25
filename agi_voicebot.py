@@ -351,6 +351,96 @@ class NetovoAGIVoiceBot:
             logger.error("Error converting audio for Asterisk", error=str(e))
             return None
 
+    def initialize_sync(self) -> bool:
+        """Initialize all voice bot components - synchronous version"""
+        try:
+            logger.info("Initializing NETOVO Voice Bot components...")
+
+            # Initialize RIVA ASR
+            self.riva_asr = RivaASRClient(self.config['riva_server'])
+            if not self.riva_asr.connect():
+                logger.error("Failed to initialize RIVA ASR")
+                return False
+
+            # Initialize RIVA TTS
+            self.riva_tts = RivaTTSClient(self.config['riva_server'])
+            if not self.riva_tts.connect():
+                logger.error("Failed to initialize RIVA TTS")
+                return False
+
+            # Initialize Ollama
+            self.ollama_client = OllamaClient(
+                base_url=self.config['ollama_url'],
+                model=self.config['ollama_model']
+            )
+            if not self.ollama_client.test_connection():
+                logger.error("Failed to initialize Ollama client")
+                return False
+
+            # Initialize audio processor
+            self.audio_processor = AudioProcessor()
+
+            # Initialize conversation context
+            self.conversation_context = ConversationContext()
+
+            logger.info("All NETOVO Voice Bot components initialized successfully")
+            return True
+
+        except Exception as e:
+            logger.error("Failed to initialize voice bot", error=str(e))
+            return False
+
+    def handle_call_sync(self):
+        """Main call handling logic - synchronous version"""
+        try:
+            logger.info("Handling incoming call",
+                       caller_id=self.caller_id,
+                       extension=self.extension)
+
+            # Call is already answered in main() - skip duplicate answer
+            self.agi.verbose(f"NETOVO Voice Bot ready for call from {self.caller_id}")
+
+            # Send greeting
+            self.send_greeting_sync()
+
+            # Simple response for now
+            self.agi.verbose("NETOVO Voice Bot conversation completed")
+
+        except Exception as e:
+            logger.error("Error handling call", error=str(e))
+            self.agi.verbose(f"Call handling error: {str(e)}")
+        finally:
+            self.agi.hangup()
+
+    def send_greeting_sync(self):
+        """Send initial greeting to caller - synchronous version"""
+        try:
+            greeting_text = "Hello, thank you for calling NETOVO. I'm Alexis, your AI assistant."
+
+            logger.info("Generating greeting TTS")
+            tts_file = self.riva_tts.synthesize_speech_to_file(
+                greeting_text,
+                sample_rate=self.config['telephony_rate']
+            )
+
+            if tts_file and os.path.exists(tts_file):
+                # Play greeting (remove .wav extension for Asterisk)
+                base_file = tts_file.replace('.wav', '')
+                self.agi.verbose("Playing greeting message")
+                self.agi.stream_file(base_file)
+                logger.info("Greeting played successfully")
+
+                # Cleanup
+                try:
+                    os.unlink(tts_file)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.error("Error sending greeting", error=str(e))
+            # Fallback to simple message
+            self.agi.stream_file("demo-thanks")
+
 async def main():
     """Main AGI script entry point"""
     try:
@@ -393,7 +483,46 @@ async def main():
         logger.error("AGI script fatal error", error=str(e))
         sys.exit(1)
 
+def main_sync():
+    """Synchronous main for pyst2 AGI"""
+    try:
+        # Configure logging for AGI
+        structlog.configure(
+            processors=[
+                structlog.stdlib.filter_by_level,
+                structlog.stdlib.add_logger_name,
+                structlog.stdlib.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.dev.ConsoleRenderer()
+            ],
+            wrapper_class=structlog.stdlib.BoundLogger,
+            logger_factory=structlog.stdlib.LoggerFactory(),
+            cache_logger_on_first_use=True,
+        )
+
+        logger.info("Starting NETOVO Voice Bot AGI Script")
+
+        # Create voice bot instance (already answers call in __init__)
+        voice_bot = NetovoAGIVoiceBot()
+        voice_bot.agi.verbose("Call answered, initializing voice bot components...", 1)
+
+        # Initialize synchronously (remove async)
+        if not voice_bot.initialize_sync():
+            voice_bot.agi.verbose("Voice bot initialization failed")
+            voice_bot.agi.stream_file("demo-unavail")
+            logger.error("Voice bot initialization failed")
+            voice_bot.agi.hangup()
+            return
+
+        # Handle the call synchronously
+        voice_bot.handle_call_sync()
+
+        logger.info("NETOVO Voice Bot AGI Script completed successfully")
+
+    except Exception as e:
+        logger.error("AGI script fatal error", error=str(e))
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main_sync()
 
 
