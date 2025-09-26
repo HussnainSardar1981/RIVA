@@ -1,29 +1,27 @@
 #!/home/aiadmin/netovo_voicebot/venv/bin/python3
 """
-NETOVO Production AGI VoiceBot - Professional 3CX Customer Support
-Integrates RIVA ASR/TTS, Ollama LLM, and conversation context management
-Uses correct AGI command syntax and robust error handling
+Simplified AGI VoiceBot - Direct Docker calls with proven commands
+Uses the exact same TTS commands that work in your test
 """
 
 import sys
 import os
 import time
-import tempfile
-import shutil
 import subprocess
-from pathlib import Path
+import tempfile
+import uuid
 from datetime import datetime
 
-# Set up project paths BEFORE any other imports
+# Set up project paths
 project_dir = "/home/aiadmin/netovo_voicebot"
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
-# Configure structured logging to voicebot.log
+# Simple logging
 import logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - VoiceBot - %(message)s',
+    format='%(asctime)s - SimpleBot - %(message)s',
     handlers=[
         logging.FileHandler('/var/log/asterisk/voicebot.log', mode='a'),
         logging.StreamHandler(sys.stderr)
@@ -31,662 +29,372 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class ProductionAGI:
-    """Production-grade AGI interface with correct command syntax"""
+class SimpleAGI:
+    """Minimal AGI with correct command syntax"""
 
     def __init__(self):
         self.env = {}
         self.connected = True
         self.call_answered = False
+        self._parse_env()
 
-        logger.info("=== NETOVO AGI VoiceBot Initializing ===")
-        self._parse_environment()
-
-    def _parse_environment(self):
-        """Parse AGI environment variables from stdin"""
-        try:
-            env_count = 0
-            while True:
-                line = sys.stdin.readline()
-                if not line:
-                    break
-                line = line.strip()
-                if not line:
-                    break
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    self.env[key.strip()] = value.strip()
-                    env_count += 1
-
-            logger.info(f"AGI environment parsed: {env_count} variables")
-            logger.info(f"Caller ID: {self.env.get('agi_callerid', 'Unknown')}")
-            logger.info(f"Channel: {self.env.get('agi_channel', 'Unknown')}")
-
-        except Exception as e:
-            logger.error(f"Environment parsing error: {e}")
-            self.env = {}
+    def _parse_env(self):
+        """Parse AGI environment"""
+        env_count = 0
+        while True:
+            line = sys.stdin.readline()
+            if not line or not line.strip():
+                break
+            if ':' in line:
+                key, value = line.split(':', 1)
+                self.env[key.strip()] = value.strip()
+                env_count += 1
+        logger.info(f"AGI env parsed: {env_count} vars")
 
     def command(self, cmd):
-        """Send AGI command with proper error handling"""
-        if not self.connected:
-            logger.warning(f"Attempted command on disconnected channel: {cmd}")
-            return "ERROR"
-
+        """Send AGI command"""
         try:
-            logger.debug(f"AGI Command: {cmd}")
-
-            # Send command to Asterisk
+            logger.debug(f"AGI: {cmd}")
             print(cmd)
             sys.stdout.flush()
 
-            # Read response
-            result = sys.stdin.readline()
-            if not result:
-                logger.error("No response from Asterisk - connection lost")
-                self.connected = False
-                return "ERROR"
+            result = sys.stdin.readline().strip()
+            logger.debug(f"Response: {result}")
 
-            result = result.strip()
-            logger.debug(f"AGI Response: {result}")
-
-            # Parse result
-            if result.startswith('200'):
-                return result
-            elif result.startswith('510'):
-                logger.error(f"Invalid AGI command: {cmd} -> {result}")
-                return "ERROR"
-            elif result.startswith('511'):
-                logger.error(f"Command not permitted: {cmd} -> {result}")
-                return "ERROR"
-            else:
-                logger.warning(f"Unexpected AGI response: {result}")
-                return result
-
-        except BrokenPipeError:
-            logger.error("Broken pipe - call likely disconnected")
+            return result
+        except:
             self.connected = False
             return "ERROR"
-        except Exception as e:
-            logger.error(f"AGI command error: {e}")
-            return "ERROR"
-
-    def verbose(self, message, level=1):
-        """Send verbose message to Asterisk logs"""
-        escaped_msg = message.replace('"', '\\"')
-        return self.command(f'VERBOSE "{escaped_msg}" {level}')
 
     def answer(self):
-        """Answer the call"""
-        if self.call_answered:
-            logger.warning("Call already answered")
-            return True
-
+        """Answer call"""
         result = self.command("ANSWER")
-        if result and result.startswith('200'):
+        success = result and result.startswith('200')
+        if success:
             self.call_answered = True
-            logger.info("Call answered successfully")
-            return True
-        else:
-            logger.error(f"Failed to answer call: {result}")
-            return False
+            logger.info("Call answered")
+        return success
 
     def hangup(self):
-        """Hangup the call"""
-        logger.info("Hanging up call...")
+        """Hangup call"""
         self.command("HANGUP")
         self.connected = False
-        self.call_answered = False
 
-    def stream_file(self, filename, escape_digits=""):
-        """Stream audio file - CORRECT AGI SYNTAX (no quotes on filename)"""
-        if not self.call_answered:
-            logger.error("Cannot stream file - call not answered")
-            return False
+    def verbose(self, msg):
+        """Verbose message"""
+        return self.command(f'VERBOSE "{msg}"')
 
-        # Remove file extension if present
+    def stream_file(self, filename):
+        """Play audio file - NO QUOTES on filename"""
         if '.' in filename:
             filename = filename.rsplit('.', 1)[0]
+        result = self.command(f'STREAM FILE {filename} ""')
+        return result and result.startswith('200')
 
-        # Correct AGI syntax: STREAM FILE filename "escape_digits"
-        result = self.command(f'STREAM FILE {filename} "{escape_digits}"')
-
-        success = result and result.startswith('200')
-        if success:
-            logger.info(f"Successfully streamed file: {filename}")
-        else:
-            logger.error(f"Failed to stream file {filename}: {result}")
-
-        return success
-
-    def record_file(self, filename, format="wav", escape_digits="#", timeout=10000, silence=3000):
-        """Record audio file - CORRECT AGI SYNTAX"""
-        if not self.call_answered:
-            logger.error("Cannot record - call not answered")
-            return False
-
-        # Correct AGI syntax: RECORD FILE filename format escape_digits timeout [offset] [BEEP] [silence]
-        # Escape digits must be quoted properly
-        result = self.command(f'RECORD FILE {filename} {format} "{escape_digits}" {timeout} 0 0 {silence}')
-
-        success = result and result.startswith('200')
-        if success:
-            logger.info(f"Recording completed: {filename}.{format}")
-        else:
-            logger.error(f"Recording failed: {result}")
-
-        return success
-
-    def get_channel_status(self):
-        """Get channel status"""
-        return self.command("CHANNEL STATUS")
+    def record_file(self, filename):
+        """Record audio - SIMPLE syntax"""
+        result = self.command(f'RECORD FILE {filename} wav "#" 8000')
+        return result and result.startswith('200')
 
     def sleep(self, seconds):
-        """Sleep using Python time.sleep (not AGI WAIT which has issues)"""
+        """Sleep"""
         time.sleep(seconds)
 
-class NetovoProductionVoiceBot:
-    """Production NETOVO VoiceBot with full AI integration"""
+class DirectTTSClient:
+    """Direct Docker TTS using your proven commands"""
 
-    def __init__(self):
-        self.agi = ProductionAGI()
-        self.caller_id = self.agi.env.get('agi_callerid', 'Unknown')
-        self.channel = self.agi.env.get('agi_channel', 'Unknown')
-        self.call_start_time = datetime.now()
+    def __init__(self, container="riva-speech"):
+        self.container = container
 
-        # Configuration
-        self.config = {
-            'max_conversation_turns': 8,
-            'max_call_duration': 300,  # 5 minutes
-            'recording_timeout': 8000,  # 8 seconds
-            'silence_timeout': 3000,    # 3 seconds
-            'riva_server': 'localhost:50051',
-            'ollama_model': 'orca2:7b'
-        }
-
-        # Component references
-        self.riva_tts = None
-        self.riva_asr = None
-        self.ollama_client = None
-        self.conversation_context = None
-
-        # Directories
-        self.sounds_dir = "/var/lib/asterisk/sounds/custom"
-        self.monitor_dir = "/var/spool/asterisk/monitor"
-        self.temp_dir = "/tmp/netovo_voicebot"
-
-        # Call state
-        self.conversation_active = True
-        self.components_initialized = False
-
-        # Ensure directories exist
-        self._ensure_directories()
-
-        logger.info(f"VoiceBot initialized for call from {self.caller_id}")
-
-    def _ensure_directories(self):
-        """Create necessary directories with proper permissions"""
+    def synthesize(self, text, voice="English-US.Female-1", sample_rate=22050):
+        """Direct TTS synthesis using Docker"""
         try:
-            directories = [self.sounds_dir, self.monitor_dir, self.temp_dir]
-            for directory in directories:
-                os.makedirs(directory, exist_ok=True)
-                os.chmod(directory, 0o755)
-            logger.info("Directory structure verified")
-        except Exception as e:
-            logger.error(f"Failed to create directories: {e}")
+            # Create host temp file
+            host_output = f"/tmp/tts_agi_{uuid.uuid4().hex}.wav"
+            container_output = f"/tmp/riva_tts_{uuid.uuid4().hex}.wav"
 
-    def initialize_components(self):
-        """Initialize RIVA, Ollama, and conversation components"""
-        try:
-            logger.info("Initializing VoiceBot components...")
-
-            # Import your working modules
-            from riva_client import RivaASRClient, RivaTTSClient
-            from ollama_client import OllamaClient, VOICE_BOT_SYSTEM_PROMPT
-            from conversation_context import ConversationContext
-
-            logger.info("Modules imported successfully")
-
-            # Initialize RIVA TTS
-            logger.info("Connecting to RIVA TTS...")
-            self.riva_tts = RivaTTSClient(self.config['riva_server'])
-            tts_connected = self.riva_tts.connect()
-            logger.info(f"RIVA TTS connected: {tts_connected}")
-
-            # Initialize RIVA ASR
-            logger.info("Connecting to RIVA ASR...")
-            self.riva_asr = RivaASRClient(self.config['riva_server'])
-            asr_connected = self.riva_asr.connect()
-            logger.info(f"RIVA ASR connected: {asr_connected}")
-
-            # Initialize Ollama
-            logger.info("Connecting to Ollama...")
-            self.ollama_client = OllamaClient(model=self.config['ollama_model'])
-            ollama_connected = self.ollama_client.health_check()
-            logger.info(f"Ollama connected: {ollama_connected}")
-
-            # Initialize conversation context
-            self.conversation_context = ConversationContext()
-
-            # Check if minimum components are available
-            if tts_connected and asr_connected and ollama_connected:
-                self.components_initialized = True
-                logger.info("All components initialized successfully")
-                return True
-            else:
-                logger.warning("Some components failed to initialize")
-                return False
-
-        except Exception as e:
-            logger.error(f"Component initialization failed: {e}")
-            return False
-
-    def convert_audio_for_asterisk(self, input_wav_path):
-        """Convert audio to Asterisk-compatible format using sox"""
-        try:
-            timestamp = int(time.time())
-            output_filename = f"tts_{timestamp}.wav"
-            output_path = os.path.join(self.sounds_dir, output_filename)
-
-            # Use sox to convert to 8kHz mono wav (compatible with Asterisk)
-            sox_cmd = [
-                'sox', input_wav_path,
-                '-r', '8000',      # 8kHz sample rate
-                '-c', '1',         # Mono
-                '-b', '16',        # 16-bit
-                output_path
+            # Run TTS - same command that works in your test
+            cmd = [
+                "sudo", "docker", "exec", self.container,
+                "/opt/riva/clients/riva_tts_client",
+                f"--riva_uri=localhost:50051",
+                f"--text={text}",
+                f"--voice_name={voice}",
+                f"--audio_file={container_output}",
+                f"--rate={sample_rate}"
             ]
 
-            result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
+            logger.info(f"Running TTS: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-            if result.returncode == 0 and os.path.exists(output_path):
-                os.chmod(output_path, 0o644)
-                logger.info(f"Audio converted to Asterisk format: {output_path}")
-                return f"custom/{output_filename.replace('.wav', '')}"  # Return without extension
+            if result.returncode != 0:
+                logger.error(f"TTS failed: {result.stderr}")
+                return None
+
+            # Copy from container to host
+            copy_cmd = ["sudo", "docker", "cp", f"{self.container}:{container_output}", host_output]
+            copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
+
+            # Cleanup container file
+            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_output],
+                          capture_output=True)
+
+            if copy_result.returncode == 0 and os.path.exists(host_output):
+                file_size = os.path.getsize(host_output)
+                logger.info(f"TTS success: {host_output} ({file_size} bytes)")
+                return host_output
             else:
-                logger.error(f"Audio conversion failed: {result.stderr}")
+                logger.error(f"TTS copy failed: {copy_result.stderr}")
                 return None
 
         except Exception as e:
-            logger.error(f"Audio conversion error: {e}")
+            logger.error(f"TTS error: {e}")
             return None
 
-    def play_tts_message(self, text):
-        """Generate TTS and play through Asterisk"""
+class DirectASRClient:
+    """Direct Docker ASR using your proven commands"""
+
+    def __init__(self, container="riva-speech"):
+        self.container = container
+
+    def transcribe_file(self, audio_file):
+        """Direct ASR transcription using Docker"""
         try:
-            if not self.riva_tts:
-                logger.error("TTS not available")
-                return False
+            container_path = f"/tmp/riva_asr_{uuid.uuid4().hex}.wav"
 
-            logger.info(f"Generating TTS: {text[:50]}...")
+            # Copy to container
+            copy_cmd = ["sudo", "docker", "cp", audio_file, f"{self.container}:{container_path}"]
+            copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
 
-            # Generate TTS using your RIVA client
-            tts_file_path = self.riva_tts.synthesize(text, sample_rate=22050)
-
-            if not tts_file_path:
-                logger.error("TTS generation returned None")
-                return False
-
-            if not os.path.exists(tts_file_path):
-                logger.error(f"TTS file not found: {tts_file_path}")
-                return False
-
-            # Check file size
-            file_size = os.path.getsize(tts_file_path)
-            logger.info(f"TTS file generated: {tts_file_path} ({file_size} bytes)")
-
-            if file_size < 1000:  # Less than 1KB indicates empty/invalid file
-                logger.error("TTS file too small - likely empty")
-                try:
-                    os.unlink(tts_file_path)
-                except:
-                    pass
-                return False
-
-            # Convert for Asterisk
-            asterisk_file = self.convert_audio_for_asterisk(tts_file_path)
-
-            # Cleanup original TTS file
-            try:
-                os.unlink(tts_file_path)
-            except:
-                pass
-
-            if not asterisk_file:
-                logger.error("Audio conversion failed")
-                return False
-
-            # Play through Asterisk
-            success = self.agi.stream_file(asterisk_file)
-
-            if success:
-                logger.info("TTS message played successfully")
-            else:
-                logger.error("Failed to play TTS message")
-
-            return success
-
-        except Exception as e:
-            logger.error(f"TTS playback error: {e}")
-            import traceback
-            logger.error(f"TTS error traceback: {traceback.format_exc()}")
-            return False
-
-    def record_and_transcribe_user_input(self):
-        """Record user speech and transcribe using RIVA ASR"""
-        try:
-            if not self.riva_asr:
-                logger.error("ASR not available")
+            if copy_result.returncode != 0:
+                logger.error(f"ASR copy failed: {copy_result.stderr}")
                 return ""
 
-            timestamp = int(time.time())
-            record_filename = f"user_input_{timestamp}"
-            record_path = os.path.join(self.monitor_dir, record_filename)
+            # Run ASR
+            cmd = [
+                "sudo", "docker", "exec", self.container,
+                "/opt/riva/clients/riva_streaming_asr_client",
+                f"--riva_uri=localhost:50051",
+                f"--audio_file={container_path}",
+                "--simulate_realtime=false",
+                "--language_code=en-US"
+            ]
 
-            logger.info("Recording user input...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-            # Record audio using correct AGI syntax
-            success = self.agi.record_file(
-                record_filename,
-                format="wav",
-                escape_digits="#",
-                timeout=self.config['recording_timeout'],
-                silence=self.config['silence_timeout']
-            )
+            # Cleanup
+            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_path],
+                          capture_output=True)
 
-            if not success:
-                logger.error("Recording command failed")
-                return ""
+            if result.returncode == 0:
+                # Parse transcript
+                lines = result.stdout.strip().split('\n')
+                for line in lines:
+                    if '"' in line and not 'Throughput' in line:
+                        import re
+                        quotes = re.findall(r'"([^"]*)"', line)
+                        for quote in quotes:
+                            if quote.strip() and len(quote.strip()) > 2:
+                                logger.info(f"ASR result: {quote.strip()}")
+                                return quote.strip()
 
-            # Check if recording file exists
-            wav_file = f"{record_path}.wav"
-            if not os.path.exists(wav_file):
-                logger.error(f"Recording file not found: {wav_file}")
-                return ""
-
-            # Check file size
-            file_size = os.path.getsize(wav_file)
-            if file_size < 1000:  # Less than 1KB indicates no speech
-                logger.info("No speech detected (file too small)")
-                try:
-                    os.unlink(wav_file)
-                except:
-                    pass
-                return ""
-
-            logger.info(f"Speech recorded: {file_size} bytes")
-
-            # Transcribe using your RIVA ASR client
-            transcript = self.riva_asr.transcribe_file(wav_file)
-
-            # Cleanup recording file
-            try:
-                os.unlink(wav_file)
-            except:
-                pass
-
-            if transcript and transcript.strip():
-                logger.info(f"Transcription: {transcript}")
-                return transcript.strip()
-            else:
-                logger.info("No speech recognized")
-                return ""
-
-        except Exception as e:
-            logger.error(f"Speech recording/transcription error: {e}")
+            logger.warning("No transcript found")
             return ""
 
-    def get_ai_response(self, user_input):
-        """Get AI response using Ollama with conversation context"""
+        except Exception as e:
+            logger.error(f"ASR error: {e}")
+            return ""
+
+class SimpleOllamaClient:
+    """Simple Ollama client"""
+
+    def __init__(self):
+        pass
+
+    def generate(self, prompt, max_tokens=50):
+        """Generate response"""
         try:
-            if not self.ollama_client:
-                return "I apologize, I'm having technical difficulties."
+            import httpx
 
-            if not user_input.strip():
-                return "I didn't hear you clearly. Could you please repeat that?"
+            payload = {
+                "model": "orca2:7b",
+                "prompt": f"You are Alexis, NETOVO customer support AI. Keep responses under 30 words.\n\nHuman: {prompt}\n\nAssistant:",
+                "stream": False,
+                "options": {"num_predict": max_tokens, "temperature": 0.1}
+            }
 
-            logger.info(f"Getting AI response for: {user_input}")
+            with httpx.Client(timeout=15.0) as client:
+                response = client.post("http://localhost:11434/api/generate", json=payload)
+                response.raise_for_status()
 
-            # Use conversation context to build prompt
-            from ollama_client import VOICE_BOT_SYSTEM_PROMPT
+                result = response.json()
+                text = result.get("response", "").strip()
 
-            if self.conversation_context:
-                full_prompt = self.conversation_context.build_prompt(user_input, VOICE_BOT_SYSTEM_PROMPT)
-            else:
-                full_prompt = f"{VOICE_BOT_SYSTEM_PROMPT}\n\nHuman: {user_input}\n\nAssistant:"
-
-            # Generate response
-            response = self.ollama_client.generate(
-                prompt=user_input,
-                system_prompt=VOICE_BOT_SYSTEM_PROMPT,
-                max_tokens=75
-            )
-
-            if response and response.strip():
-                # Add to conversation context
-                if self.conversation_context:
-                    self.conversation_context.add_turn(user_input, response)
-
-                logger.info(f"AI Response: {response[:50]}...")
-                return response.strip()
-            else:
-                logger.error("Empty AI response")
-                return "I apologize, I'm having trouble processing that right now."
+                logger.info(f"Ollama response: {text[:50]}")
+                return text
 
         except Exception as e:
-            logger.error(f"AI response error: {e}")
-            return "I'm sorry, I'm experiencing technical difficulties. How else can I help you?"
+            logger.error(f"Ollama error: {e}")
+            return "I'm having technical difficulties. How else can I help?"
 
-    def run_conversation_loop(self):
-        """Main conversation loop with full AI integration"""
-        try:
-            logger.info("Starting conversation loop...")
-            turn_count = 0
-            consecutive_failures = 0
-            max_failures = 3
+def convert_audio_for_asterisk(input_wav):
+    """Convert to 8kHz mono for Asterisk"""
+    try:
+        timestamp = int(time.time())
+        output_path = f"/var/lib/asterisk/sounds/custom/tts_{timestamp}.wav"
 
-            while (self.conversation_active and
-                   turn_count < self.config['max_conversation_turns'] and
-                   consecutive_failures < max_failures):
+        # Ensure directory exists
+        os.makedirs("/var/lib/asterisk/sounds/custom", exist_ok=True)
 
-                # Check call duration
-                call_duration = (datetime.now() - self.call_start_time).total_seconds()
-                if call_duration > self.config['max_call_duration']:
-                    logger.info(f"Maximum call duration reached: {call_duration}s")
-                    self.play_tts_message("Thank you for calling NETOVO. Have a great day!")
-                    break
+        # Convert with sox
+        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-b', '16', output_path]
+        result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
 
-                turn_count += 1
-                logger.info(f"Conversation turn {turn_count}")
+        if result.returncode == 0 and os.path.exists(output_path):
+            os.chmod(output_path, 0o644)
+            return f"custom/tts_{timestamp}"  # Return without .wav extension
+        else:
+            logger.error(f"Sox conversion failed: {result.stderr}")
+            return None
 
-                # Record and transcribe user input
-                user_input = self.record_and_transcribe_user_input()
+    except Exception as e:
+        logger.error(f"Audio conversion error: {e}")
+        return None
 
-                if not user_input:
-                    consecutive_failures += 1
-                    logger.warning(f"No user input detected (failure {consecutive_failures}/{max_failures})")
+def main():
+    """Main AGI handler"""
+    try:
+        logger.info("=== Simple AGI VoiceBot Starting ===")
 
-                    if consecutive_failures == 1:
-                        self.play_tts_message("I didn't catch that. Could you please speak clearly?")
-                    elif consecutive_failures == 2:
-                        self.play_tts_message("I'm having trouble hearing you. Please try again.")
-                    else:
-                        self.play_tts_message("I apologize for the difficulty. Let me transfer you to someone who can help.")
-                        break
-                    continue
+        # Initialize AGI
+        agi = SimpleAGI()
+        caller_id = agi.env.get('agi_callerid', 'Unknown')
+        logger.info(f"Call from: {caller_id}")
 
-                # Reset failure count on successful input
-                consecutive_failures = 0
+        # Answer call
+        if not agi.answer():
+            logger.error("Failed to answer")
+            return
 
-                # Check for conversation exit keywords
-                user_lower = user_input.lower()
-                exit_keywords = ['goodbye', 'bye', 'hang up', 'end call', 'thanks goodbye', 'that\'s all']
-                if any(keyword in user_lower for keyword in exit_keywords):
-                    self.play_tts_message("Thank you for calling NETOVO. Have a wonderful day!")
-                    break
+        agi.sleep(1)
+        agi.verbose("Simple VoiceBot Active")
 
-                # Check for escalation keywords
-                escalation_keywords = ['human', 'agent', 'person', 'representative', 'manager', 'transfer']
-                if any(keyword in user_lower for keyword in escalation_keywords):
-                    self.play_tts_message("I'll connect you with one of our team members right away. Please hold.")
-                    break
+        # Initialize components
+        tts = DirectTTSClient()
+        asr = DirectASRClient()
+        ollama = SimpleOllamaClient()
 
-                # Check conversation context for escalation
-                if self.conversation_context and self.conversation_context.should_escalate():
-                    logger.info("Conversation context suggests escalation")
-                    self.play_tts_message("Let me connect you with a specialist who can better assist you.")
-                    break
+        # Send greeting
+        logger.info("Generating greeting...")
+        greeting_text = "Hello, thank you for calling NETOVO. I'm Alexis. How can I help you?"
 
-                # Get AI response
-                ai_response = self.get_ai_response(user_input)
+        tts_file = tts.synthesize(greeting_text)
 
-                # Play AI response
-                if not self.play_tts_message(ai_response):
-                    logger.error("Failed to play AI response")
-                    self.play_tts_message("I apologize, I'm having technical difficulties.")
-                    break
+        if tts_file and os.path.exists(tts_file):
+            asterisk_file = convert_audio_for_asterisk(tts_file)
 
-                # Brief pause between turns
-                self.agi.sleep(0.5)
-
-            logger.info(f"Conversation completed after {turn_count} turns")
-
-        except Exception as e:
-            logger.error(f"Conversation loop error: {e}")
+            # Cleanup TTS file
             try:
-                self.play_tts_message("I apologize, we're experiencing technical difficulties.")
+                os.unlink(tts_file)
             except:
                 pass
 
-    def send_greeting(self):
-        """Send initial greeting"""
-        try:
-            if self.conversation_context:
-                greeting = self.conversation_context.get_greeting_prompt()
+            if asterisk_file:
+                success = agi.stream_file(asterisk_file)
+                logger.info(f"Greeting played: {success}")
             else:
-                greeting = "Hello, thank you for calling NETOVO. I'm Alexis, your AI assistant. How can I help you today?"
+                logger.error("Audio conversion failed")
+                agi.stream_file("hello")  # Fallback
+        else:
+            logger.error("TTS greeting failed")
+            agi.stream_file("hello")  # Fallback
 
-            if greeting:
-                return self.play_tts_message(greeting)
-            return True
+        # Simple conversation loop
+        for turn in range(3):
+            logger.info(f"Conversation turn {turn + 1}")
 
-        except Exception as e:
-            logger.error(f"Greeting error: {e}")
-            return False
+            # Record user input
+            record_file = f"/var/spool/asterisk/monitor/user_{int(time.time())}"
 
-    def handle_call(self):
-        """Main call handling method"""
-        call_success = False
+            logger.info("Recording user...")
+            if agi.record_file(record_file):
+                wav_file = f"{record_file}.wav"
 
-        try:
-            logger.info(f"=== Handling call from {self.caller_id} ===")
+                if os.path.exists(wav_file):
+                    file_size = os.path.getsize(wav_file)
+                    logger.info(f"Recording: {file_size} bytes")
 
-            # Step 1: Answer call
-            if not self.agi.answer():
-                logger.error("Failed to answer call")
-                return
+                    if file_size > 1000:
+                        # Transcribe
+                        transcript = asr.transcribe_file(wav_file)
 
-            # Brief pause for media establishment
-            self.agi.sleep(1)
+                        if transcript:
+                            logger.info(f"User said: {transcript}")
 
-            # Step 2: Initialize components
-            if not self.initialize_components():
-                logger.error("Component initialization failed - using basic fallback")
-                self.agi.verbose("VoiceBot component initialization failed")
+                            # Check for exit
+                            if any(word in transcript.lower() for word in ['bye', 'goodbye', 'thank you']):
+                                response = "Thank you for calling NETOVO. Have a great day!"
+                            else:
+                                # Get AI response
+                                response = ollama.generate(transcript)
+                        else:
+                            response = "I didn't catch that. Could you repeat?"
+                    else:
+                        response = "I didn't hear anything. Could you speak up?"
 
-                # Basic fallback
+                    # Cleanup recording
+                    try:
+                        os.unlink(wav_file)
+                    except:
+                        pass
+                else:
+                    response = "Recording failed. Let me try again."
+            else:
+                response = "I'm having trouble hearing you."
+
+            # Speak response
+            logger.info(f"Responding: {response[:30]}...")
+
+            tts_file = tts.synthesize(response)
+            if tts_file and os.path.exists(tts_file):
+                asterisk_file = convert_audio_for_asterisk(tts_file)
+
                 try:
-                    self.agi.stream_file("hello")
-                    self.agi.sleep(2)
-                    self.agi.stream_file("goodbye")
-                except:
-                    pass
-                return
-
-            # Step 3: Send greeting
-            logger.info("Sending greeting...")
-            if not self.send_greeting():
-                logger.warning("Greeting failed - continuing anyway")
-
-            # Step 4: Run conversation
-            logger.info("Starting conversation...")
-            self.run_conversation_loop()
-
-            call_success = True
-            logger.info("Call handling completed successfully")
-
-        except Exception as e:
-            logger.error(f"Critical call handling error: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-
-            # Emergency fallback
-            try:
-                self.play_tts_message("I apologize for the technical difficulty.")
-            except:
-                try:
-                    self.agi.stream_file("pbx-invalid")
+                    os.unlink(tts_file)
                 except:
                     pass
 
-        finally:
-            # Graceful cleanup
-            try:
-                call_duration = (datetime.now() - self.call_start_time).total_seconds()
-                logger.info(f"Call completed - Duration: {call_duration:.1f}s - Success: {call_success}")
+                if asterisk_file:
+                    agi.stream_file(asterisk_file)
+                else:
+                    agi.stream_file("demo-thanks")  # Fallback
+            else:
+                agi.stream_file("demo-thanks")  # Fallback
 
-                self.agi.sleep(1)
-                if self.agi.connected:
-                    self.agi.hangup()
+            # Check for exit
+            if 'thank you' in response.lower() or 'great day' in response.lower():
+                break
 
-            except Exception as cleanup_error:
-                logger.error(f"Cleanup error: {cleanup_error}")
+            agi.sleep(1)
 
-def main():
-    """Main entry point for AGI script"""
-    start_time = datetime.now()
+        # End call
+        logger.info("Ending call")
+        agi.sleep(1)
+        agi.hangup()
 
-    try:
-        logger.info("=" * 60)
-        logger.info("NETOVO Production VoiceBot Starting")
-        logger.info(f"Start time: {start_time}")
-        logger.info(f"Python version: {sys.version}")
-        logger.info("=" * 60)
+        logger.info("=== Simple VoiceBot completed ===")
 
-        # Create and run voicebot
-        voicebot = NetovoProductionVoiceBot()
-        voicebot.handle_call()
-
-        end_time = datetime.now()
-        execution_time = (end_time - start_time).total_seconds()
-
-        logger.info("=" * 60)
-        logger.info("NETOVO Production VoiceBot Completed")
-        logger.info(f"End time: {end_time}")
-        logger.info(f"Total execution time: {execution_time:.2f} seconds")
-        logger.info("=" * 60)
-
-    except KeyboardInterrupt:
-        logger.warning("VoiceBot interrupted")
-    except SystemExit as e:
-        logger.info(f"VoiceBot exiting with code: {e.code}")
     except Exception as e:
-        logger.error("=" * 60)
-        logger.error("FATAL ERROR IN MAIN")
-        logger.error(f"Error: {str(e)}")
-        logger.error(f"Type: {type(e).__name__}")
-
+        logger.error(f"Fatal error: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        logger.error("=" * 60)
 
-        # Emergency AGI fallback
         try:
-            emergency_agi = ProductionAGI()
-            emergency_agi.answer()
-            emergency_agi.verbose("VoiceBot fatal error")
-            emergency_agi.stream_file("pbx-invalid")
-            emergency_agi.sleep(2)
-            emergency_agi.hangup()
+            agi = SimpleAGI()
+            agi.answer()
+            agi.verbose("VoiceBot error")
+            agi.sleep(1)
+            agi.hangup()
         except:
             pass
 
