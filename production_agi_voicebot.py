@@ -269,8 +269,8 @@ def convert_audio_for_asterisk(input_wav):
         os.makedirs("/var/lib/asterisk/sounds/custom", exist_ok=True)
         logger.info(f"Converting {input_wav} to {output_path}")
 
-        # Convert with sox to μ-law format (G.711 telephony standard)
-        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-e', 'mu-law', output_path]
+        # Convert with sox to 16-bit PCM format (Asterisk WAV requirement)
+        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-b', '16', '-e', 'signed-integer', output_path]
         logger.info(f"Sox command: {' '.join(sox_cmd)}")
 
         result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
