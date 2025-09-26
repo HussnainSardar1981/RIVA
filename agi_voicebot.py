@@ -462,46 +462,58 @@ class NetovoRivaVoiceBot:
             return False
 
     def send_greeting(self):
-        """Send greeting with TTS or fallback"""
+        """Send greeting with RIVA TTS - FORCE TTS generation"""
         greeting_text = "Hello, thank you for calling NETOVO. I'm Alexis, your AI assistant. How can I help you today?"
 
         try:
-            logger.info("Attempting to send TTS greeting...")
+            logger.info("=== GREETING GENERATION START ===")
+            logger.info(f"RIVA TTS available: {self.component_status.get('riva_tts', False)}")
+            logger.info(f"RIVA TTS object: {self.riva_tts}")
 
-            # Try RIVA TTS first
-            if self.component_status['riva_tts'] and self.riva_tts:
-                logger.info("Generating RIVA TTS greeting...")
+            # FORCE RIVA TTS attempt regardless of status
+            if self.riva_tts:
+                logger.info("FORCING RIVA TTS generation...")
+                logger.info(f"Calling synthesize with text: '{greeting_text[:50]}...'")
 
-                tts_file = self.riva_tts.synthesize(
-                    greeting_text,
-                    voice="English-US.Female-1",
-                    sample_rate=self.config['telephony_rate']
-                )
+                try:
+                    tts_file = self.riva_tts.synthesize(
+                        greeting_text,
+                        voice="English-US.Female-1",
+                        sample_rate=self.config['telephony_rate']
+                    )
+                    logger.info(f"RIVA synthesize returned: {tts_file}")
 
-                if tts_file and os.path.exists(tts_file):
-                    result = self._play_wav_file(tts_file, greeting_text)
+                    if tts_file and os.path.exists(tts_file):
+                        logger.info(f"TTS file exists: {tts_file}, size: {os.path.getsize(tts_file)} bytes")
+                        result = self._play_wav_file(tts_file, greeting_text)
+                        logger.info(f"Playback result: {result}")
 
-                    # Cleanup temp file
-                    try:
-                        os.unlink(tts_file)
-                    except:
-                        pass
+                        # Cleanup temp file
+                        try:
+                            os.unlink(tts_file)
+                        except:
+                            pass
 
-                    if "ERROR" not in result:
-                        logger.info("RIVA TTS greeting played successfully")
-                        return True
+                        if "ERROR" not in result:
+                            logger.info("=== RIVA TTS SUCCESS ===")
+                            return True
+                        else:
+                            logger.error(f"=== RIVA TTS PLAYBACK FAILED: {result} ===")
                     else:
-                        logger.warning("RIVA TTS playback failed, trying fallback")
+                        logger.error(f"=== TTS FILE GENERATION FAILED: {tts_file} ===")
 
-            # Fallback to built-in Asterisk sounds
-            logger.info("Using audio fallback for greeting")
-            result = self._emergency_audio_fallback("NETOVO greeting")
+                except Exception as riva_error:
+                    logger.error(f"=== RIVA TTS EXCEPTION: {riva_error} ===")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
 
-            return "ERROR" not in result
+            # Only use fallback if RIVA completely failed
+            logger.warning("RIVA TTS failed - using basic greeting")
+            self.agi.stream_file("hello")
+            return True
 
         except Exception as e:
-            logger.error(f"Greeting error: {str(e)}")
-            # Emergency fallback
+            logger.error(f"=== GREETING TOTAL FAILURE: {str(e)} ===")
             try:
                 self.agi.stream_file("hello")
                 return True
@@ -639,30 +651,25 @@ class NetovoRivaVoiceBot:
             logger.info("Initializing components...")
             components_ready = self.initialize_components()
 
-            # Skip emergency mode if we have RIVA TTS - go straight to conversation
-            if self.emergency_fallback and not self.component_status.get('riva_tts', False):
-                logger.warning("Running in emergency fallback mode - no RIVA TTS available")
-                self._run_emergency_mode()
-                # Don't return here - continue to greeting
-                logger.info("Continuing after emergency mode...")
-            elif self.component_status.get('riva_tts', False):
-                logger.info("RIVA TTS available - skipping emergency mode")
+            # DEBUG: Log component status clearly
+            logger.info(f"Component status check: RIVA_TTS={self.component_status.get('riva_tts', False)}")
+            logger.info(f"Emergency fallback: {self.emergency_fallback}")
+            logger.info(f"Components ready: {components_ready}")
+
+            # Skip emergency mode completely - force normal conversation
+            if self.component_status.get('riva_tts', False):
+                logger.info("RIVA TTS confirmed available - proceeding with full conversation")
+            else:
+                logger.warning("RIVA TTS not available - but proceeding anyway")
 
             # Step 3: Send greeting
             logger.info("Sending greeting...")
             if not self.send_greeting():
                 logger.warning("Greeting failed - continuing with reduced functionality")
 
-            # Step 4: Run conversation - ALWAYS run full conversation if RIVA TTS available
-            if self.component_status.get('riva_tts', False):
-                logger.info("Starting RIVA-powered conversation loop")
-                self.run_conversation_loop()
-            elif components_ready:
-                logger.info("Starting conversation with available components")
-                self.run_conversation_loop()
-            else:
-                logger.info("Running conversation with limited functionality")
-                self._run_limited_conversation()
+            # Step 4: FORCE full conversation loop - no more fallbacks
+            logger.info("FORCING full conversation loop regardless of component status")
+            self.run_conversation_loop()
 
             call_success = True
             logger.info("Call handling completed successfully")
