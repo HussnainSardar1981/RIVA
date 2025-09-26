@@ -88,8 +88,19 @@ class SimpleAGI:
         """Play audio file - NO QUOTES on filename"""
         if '.' in filename:
             filename = filename.rsplit('.', 1)[0]
+
+        # Log what we're trying to play
+        full_path = f"/var/lib/asterisk/sounds/{filename}.wav"
+        if os.path.exists(full_path):
+            file_size = os.path.getsize(full_path)
+            logger.info(f"Attempting to play: {filename} (file exists: {file_size} bytes)")
+        else:
+            logger.error(f"Audio file not found: {full_path}")
+
         result = self.command(f'STREAM FILE {filename} ""')
-        return result and result.startswith('200')
+        success = result and result.startswith('200')
+        logger.info(f"Stream file result: {result} (success: {success})")
+        return success
 
     def record_file(self, filename):
         """Record audio - SIMPLE syntax"""
@@ -245,20 +256,33 @@ def convert_audio_for_asterisk(input_wav):
 
         # Ensure directory exists
         os.makedirs("/var/lib/asterisk/sounds/custom", exist_ok=True)
+        logger.info(f"Converting {input_wav} to {output_path}")
 
         # Convert with sox
         sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-b', '16', output_path]
+        logger.info(f"Sox command: {' '.join(sox_cmd)}")
+
         result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
 
+        logger.info(f"Sox result: returncode={result.returncode}")
+        if result.stdout:
+            logger.info(f"Sox stdout: {result.stdout}")
+        if result.stderr:
+            logger.info(f"Sox stderr: {result.stderr}")
+
         if result.returncode == 0 and os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
             os.chmod(output_path, 0o644)
+            logger.info(f"Audio converted successfully: {output_path} ({file_size} bytes)")
             return f"custom/tts_{timestamp}"  # Return without .wav extension
         else:
-            logger.error(f"Sox conversion failed: {result.stderr}")
+            logger.error(f"Sox conversion failed: returncode={result.returncode}, stderr={result.stderr}")
             return None
 
     except Exception as e:
         logger.error(f"Audio conversion error: {e}")
+        import traceback
+        logger.error(f"Conversion traceback: {traceback.format_exc()}")
         return None
 
 def main():
