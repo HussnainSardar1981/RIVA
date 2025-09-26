@@ -414,7 +414,7 @@ class NetovoRivaVoiceBot:
                     model=self.config['ollama_model']
                 )
                 # Test connection with simple query
-                if self.ollama_client.is_healthy():
+                if self.ollama_client.health_check():
                     self.component_status['ollama'] = True
                     logger.info("Ollama client initialized successfully")
                 else:
@@ -472,8 +472,9 @@ class NetovoRivaVoiceBot:
             if self.component_status['riva_tts'] and self.riva_tts:
                 logger.info("Generating RIVA TTS greeting...")
 
-                tts_file = self.riva_tts.synthesize_speech_to_file(
+                tts_file = self.riva_tts.synthesize(
                     greeting_text,
+                    voice="English-US.Female-1",
                     sample_rate=self.config['telephony_rate']
                 )
 
@@ -569,8 +570,9 @@ class NetovoRivaVoiceBot:
             if self.component_status['riva_tts'] and self.riva_tts:
                 logger.info(f"Generating RIVA TTS for: '{text[:50]}...'")
 
-                tts_file = self.riva_tts.synthesize_speech_to_file(
+                tts_file = self.riva_tts.synthesize(
                     text,
+                    voice="English-US.Female-1",
                     sample_rate=self.config['telephony_rate']
                 )
 
