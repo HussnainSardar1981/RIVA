@@ -1,7 +1,7 @@
 #!/home/aiadmin/netovo_voicebot/venv/bin/python3
 """
-NETOVO Production AGI VoiceBot - Fixed Version
-Handles complete conversation with proper AGI error handling
+NETOVO Production AGI VoiceBot - No Sudo Required
+Fixed version that doesn't require sudo and handles TTS failures gracefully
 """
 
 import sys
@@ -17,7 +17,7 @@ project_dir = "/home/aiadmin/netovo_voicebot"
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
-# Set up logging to voicebot.log as requested
+# Set up logging
 import logging
 logging.basicConfig(
     level=logging.INFO,
@@ -75,8 +75,8 @@ class ProductionAGI:
             
             if result.startswith('200'):
                 return result
-            elif result.startswith('510'):
-                logger.error(f"Invalid AGI command: {cmd}")
+            elif result.startswith('510') or result.startswith('511'):
+                logger.error(f"AGI command failed: {cmd} -> {result}")
                 return "ERROR"
             else:
                 return result
@@ -88,38 +88,46 @@ class ProductionAGI:
 
     def verbose(self, message, level=1):
         """Send verbose message"""
-        return self.command(f'VERBOSE "{message}" {level}')
+        # Escape quotes in message
+        escaped_message = message.replace('"', '\\"')
+        return self.command(f'VERBOSE "{escaped_message}" {level}')
 
     def answer(self):
         """Answer call"""
         result = self.command("ANSWER")
-        success = result != "ERROR" and not result.startswith('510')
+        success = result != "ERROR"
         logger.info(f"Call answer result: {success}")
         return success
 
     def hangup(self):
         """Hangup call"""
-        self.command("HANGUP")
-        self.connected = False
+        if self.connected:
+            self.command("HANGUP")
+            self.connected = False
 
     def stream_file(self, filename, escape_digits=""):
-        """Stream audio file"""
+        """Stream audio file - remove extension for Asterisk"""
         if '.' in filename:
             filename = filename.rsplit('.', 1)[0]
+        
         result = self.command(f'STREAM FILE "{filename}" "{escape_digits}"')
-        success = result != "ERROR" and not result.startswith('510')
+        success = result != "ERROR"
         logger.info(f"Stream file '{filename}' result: {success}")
         return success
 
     def record_file(self, filename, format="wav", escape_digits="#", timeout=10000, max_silence=3000):
         """Record audio with timeout and silence detection"""
         result = self.command(f'RECORD FILE "{filename}" "{format}" "{escape_digits}" {timeout} 0 0 {max_silence}')
-        success = result != "ERROR" and not result.startswith('510')
+        success = result != "ERROR"
         logger.info(f"Record file result: {success}")
         return success
 
+    def wait(self, seconds):
+        """Wait for specified seconds"""
+        return self.command(f"WAIT {seconds}")
+
 class NetovoProductionVoiceBot:
-    """Production VoiceBot with minimal dependencies for stability"""
+    """Production VoiceBot with no sudo requirements"""
 
     def __init__(self):
         self.agi = ProductionAGI()
@@ -137,41 +145,38 @@ class NetovoProductionVoiceBot:
             'ollama_model': 'orca2:7b'
         }
 
-        # Component references (will be initialized later)
+        # Component references
         self.riva_tts = None
         self.riva_asr = None  
         self.ollama_client = None
-        self.audio_processor = None
         self.conversation = None
         
-        # Directories
-        self.sounds_dir = "/var/lib/asterisk/sounds/custom"
-        self.monitor_dir = "/var/spool/asterisk/monitor"
+        # Directories - use /tmp to avoid permission issues
+        self.sounds_dir = "/tmp/asterisk_sounds"
+        self.monitor_dir = "/tmp/asterisk_monitor"
         
         # Call state
         self.call_start_time = time.time()
         self.conversation_active = True
         
-        # Create directories
+        # Create directories with proper permissions
         try:
-            os.makedirs(self.sounds_dir, exist_ok=True)
-            os.makedirs(self.monitor_dir, exist_ok=True)
-        except:
-            pass
+            os.makedirs(self.sounds_dir, mode=0o755, exist_ok=True)
+            os.makedirs(self.monitor_dir, mode=0o755, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Directory creation failed: {e}")
 
     def safe_import_modules(self):
-        """Safely import required modules with fallbacks"""
+        """Safely import required modules"""
         try:
-            logger.info("Attempting to import VoiceBot modules...")
+            logger.info("Importing VoiceBot modules...")
             
-            # Import modules one by one
             from riva_client import RivaASRClient, RivaTTSClient
-            from ollama_client import OllamaClient, VOICE_BOT_SYSTEM_PROMPT
-            from audio_processing import AudioProcessor
+            from ollama_client import OllamaClient
             from conversation_context import ConversationContext
             
             logger.info("All modules imported successfully")
-            return True, (RivaASRClient, RivaTTSClient, OllamaClient, VOICE_BOT_SYSTEM_PROMPT, AudioProcessor, ConversationContext)
+            return True, (RivaASRClient, RivaTTSClient, OllamaClient, ConversationContext)
             
         except Exception as e:
             logger.error(f"Module import failed: {e}")
@@ -188,19 +193,17 @@ class NetovoProductionVoiceBot:
                 logger.error("Cannot import required modules")
                 return False
             
-            RivaASRClient, RivaTTSClient, OllamaClient, VOICE_BOT_SYSTEM_PROMPT, AudioProcessor, ConversationContext = modules
+            RivaASRClient, RivaTTSClient, OllamaClient, ConversationContext = modules
             
-            # Initialize components
+            # Initialize RIVA components
             self.riva_tts = RivaTTSClient(self.config['riva_server'])
             self.riva_asr = RivaASRClient(self.config['riva_server'])
             
-            if not self.riva_tts.connect():
-                logger.error("RIVA TTS connection failed")
-                return False
-                
-            if not self.riva_asr.connect():
-                logger.error("RIVA ASR connection failed")
-                return False
+            riva_tts_ok = self.riva_tts.connect()
+            riva_asr_ok = self.riva_asr.connect()
+            
+            logger.info(f"RIVA TTS connected: {riva_tts_ok}")
+            logger.info(f"RIVA ASR connected: {riva_asr_ok}")
 
             # Initialize Ollama
             self.ollama_client = OllamaClient(
@@ -208,67 +211,95 @@ class NetovoProductionVoiceBot:
                 model=self.config['ollama_model']
             )
             
-            if not self.ollama_client.health_check():
-                logger.error("Ollama health check failed")
-                return False
+            ollama_ok = self.ollama_client.health_check()
+            logger.info(f"Ollama connected: {ollama_ok}")
 
-            # Initialize other components
-            self.audio_processor = AudioProcessor()
+            # Initialize conversation context
             self.conversation = ConversationContext()
 
-            logger.info("All components initialized successfully")
-            return True
+            # Return True if at least some components work
+            if riva_tts_ok or ollama_ok:
+                logger.info("Partial component initialization successful")
+                return True
+            else:
+                logger.error("All component initialization failed")
+                return False
 
         except Exception as e:
             logger.error(f"Component initialization failed: {e}")
             return False
 
-    def convert_audio_for_asterisk(self, input_wav):
-        """Convert audio to Asterisk-compatible format"""
+    def convert_audio_simple(self, input_wav):
+        """Convert audio without requiring sudo"""
         try:
             timestamp = int(time.time())
             base_name = f"voicebot_{timestamp}"
-            output_path = os.path.join(self.sounds_dir, f"{base_name}.wav")
             
-            # Use sox to convert to 8kHz µ-law
-            cmd = [
-                'sox', input_wav,
-                '-r', '8000',
-                '-c', '1', 
-                '-e', 'mu-law',
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
+            # Try to copy to Asterisk sounds directory
+            try:
+                asterisk_sounds = "/var/lib/asterisk/sounds/custom"
+                os.makedirs(asterisk_sounds, exist_ok=True)
+                
+                output_path = os.path.join(asterisk_sounds, f"{base_name}.wav")
+                
+                # Simple copy without format conversion first
+                import shutil
+                shutil.copy2(input_wav, output_path)
                 os.chmod(output_path, 0o644)
-                logger.info(f"Audio converted: {output_path}")
+                
+                logger.info(f"Audio copied to Asterisk sounds: {output_path}")
                 return f"custom/{base_name}"
-            else:
-                logger.error(f"Audio conversion failed: {result.stderr}")
-                return None
+                
+            except Exception as e:
+                logger.warning(f"Cannot copy to Asterisk sounds dir: {e}")
+                
+                # Fallback: try to use sox without sudo
+                try:
+                    output_path = os.path.join(self.sounds_dir, f"{base_name}.wav")
+                    
+                    # Try sox without sudo
+                    cmd = ['sox', input_wav, '-r', '8000', '-c', '1', output_path]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                    
+                    if result.returncode == 0 and os.path.exists(output_path):
+                        # Create symlink to Asterisk directory if possible
+                        try:
+                            asterisk_link = f"/var/lib/asterisk/sounds/custom/{base_name}.wav"
+                            os.symlink(output_path, asterisk_link)
+                            return f"custom/{base_name}"
+                        except:
+                            # Use absolute path as fallback
+                            return output_path.replace('.wav', '')
+                    else:
+                        logger.error(f"Sox conversion failed: {result.stderr}")
+                        return None
+                        
+                except Exception as e:
+                    logger.error(f"Sox fallback failed: {e}")
+                    return None
                 
         except Exception as e:
             logger.error(f"Audio conversion error: {e}")
             return None
 
     def play_tts_message(self, text):
-        """Generate and play TTS message"""
+        """Generate and play TTS message with fallbacks"""
         try:
             if not self.riva_tts:
                 logger.error("TTS not initialized")
-                return False
+                return self.play_fallback_message()
 
             logger.info(f"Generating TTS: {text[:50]}...")
             
-            tts_file = self.riva_tts.synthesize(text, sample_rate=22050)
+            # Generate TTS
+            tts_file = self.riva_tts.synthesize(text, sample_rate=8000)  # Use 8kHz directly
             
             if not tts_file or not os.path.exists(tts_file):
                 logger.error("TTS generation failed")
-                return False
+                return self.play_fallback_message()
 
-            asterisk_file = self.convert_audio_for_asterisk(tts_file)
+            # Convert audio for Asterisk
+            asterisk_file = self.convert_audio_simple(tts_file)
             
             # Cleanup temp file
             try:
@@ -278,13 +309,39 @@ class NetovoProductionVoiceBot:
 
             if not asterisk_file:
                 logger.error("Audio conversion failed")
-                return False
+                return self.play_fallback_message()
 
+            # Play the file
             result = self.agi.stream_file(asterisk_file)
+            
+            if result:
+                logger.info("TTS message played successfully")
+            else:
+                logger.error("Failed to stream TTS file")
+                return self.play_fallback_message()
+                
             return result
 
         except Exception as e:
             logger.error(f"TTS playback error: {e}")
+            return self.play_fallback_message()
+
+    def play_fallback_message(self):
+        """Play fallback message when TTS fails"""
+        try:
+            # Try common Asterisk sound files
+            fallback_sounds = ["hello", "beep", "demo-thanks", "digits/1"]
+            
+            for sound in fallback_sounds:
+                if self.agi.stream_file(sound):
+                    logger.info(f"Played fallback sound: {sound}")
+                    return True
+                    
+            logger.error("All fallback sounds failed")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Fallback message error: {e}")
             return False
 
     def record_and_transcribe(self):
@@ -318,14 +375,16 @@ class NetovoProductionVoiceBot:
 
             file_size = os.path.getsize(wav_file)
             if file_size < 1000:
-                logger.info("No speech detected (file too small)")
+                logger.info("No speech detected")
                 os.unlink(wav_file)
                 return ""
 
             logger.info(f"Speech recorded: {file_size} bytes")
 
+            # Transcribe
             transcript = self.riva_asr.transcribe_file(wav_file)
             
+            # Cleanup
             try:
                 os.unlink(wav_file)
             except:
@@ -353,10 +412,12 @@ class NetovoProductionVoiceBot:
 
             logger.info(f"Getting AI response for: {user_input}")
 
+            system_prompt = "You are Alexis, a helpful customer service AI for NETOVO. Keep responses under 40 words for voice calls. Be professional and direct."
+
             response = self.ollama_client.generate(
                 prompt=user_input,
-                system_prompt="You are Alexis, a helpful customer service AI for NETOVO. Keep responses under 50 words for voice calls. Be professional and direct.",
-                max_tokens=75
+                system_prompt=system_prompt,
+                max_tokens=60
             )
 
             if response and response.strip():
@@ -371,68 +432,48 @@ class NetovoProductionVoiceBot:
 
         except Exception as e:
             logger.error(f"AI response error: {e}")
-            return "I apologize for the technical difficulty. How can I assist you today?"
+            return "I apologize for the technical difficulty."
 
-    def run_conversation_loop(self):
-        """Main conversation loop"""
+    def run_simple_interaction(self):
+        """Run a simple interaction without complex conversation loop"""
         try:
-            turn_count = 0
-            consecutive_failures = 0
+            logger.info("Starting simple interaction")
             
-            while (self.conversation_active and 
-                   turn_count < self.config['max_conversation_turns'] and
-                   consecutive_failures < 3):
+            # Send greeting
+            greeting = "Hello, thank you for calling NETOVO. I'm Alexis, your AI assistant. How can I help you today?"
+            
+            if not self.play_tts_message(greeting):
+                logger.error("Greeting failed")
+                return False
+
+            # Wait a moment
+            self.agi.wait(2)
+
+            # Try one interaction
+            user_input = self.record_and_transcribe()
+            
+            if user_input:
+                logger.info(f"User said: {user_input}")
                 
-                if time.time() - self.call_start_time > self.config['max_call_duration']:
-                    self.play_tts_message("Thank you for calling NETOVO. Have a great day!")
-                    break
-
-                turn_count += 1
-                logger.info(f"Conversation turn {turn_count}")
-
-                user_input = self.record_and_transcribe()
-
-                if not user_input:
-                    consecutive_failures += 1
-                    
-                    if consecutive_failures == 1:
-                        self.play_tts_message("I didn't catch that. Could you please speak clearly?")
-                    elif consecutive_failures == 2:
-                        self.play_tts_message("I'm having trouble hearing you.")
-                    else:
-                        self.play_tts_message("I apologize for the difficulty. Let me transfer you.")
-                        break
-                    continue
-
-                consecutive_failures = 0
-
-                # Check for exit keywords
-                user_lower = user_input.lower()
-                if any(word in user_lower for word in ['goodbye', 'bye', 'hang up', 'end call', 'thank you']):
-                    self.play_tts_message("Thank you for calling NETOVO. Have a wonderful day!")
-                    break
-
-                # Check for escalation
-                if any(word in user_lower for word in ['human', 'agent', 'person', 'representative']):
-                    self.play_tts_message("I'll connect you with a human agent right away.")
-                    break
-
                 ai_response = self.get_ai_response(user_input)
                 
                 if not self.play_tts_message(ai_response):
-                    logger.error("Failed to play AI response")
-                    break
+                    logger.error("Response playback failed")
+                    return False
+            else:
+                self.play_tts_message("I didn't hear anything. Thank you for calling.")
 
-                time.sleep(0.5)
-
-            logger.info(f"Conversation ended after {turn_count} turns")
+            # Goodbye
+            self.play_tts_message("Thank you for calling NETOVO. Have a great day!")
+            
+            return True
 
         except Exception as e:
-            logger.error(f"Conversation loop error: {e}")
-            self.play_tts_message("I apologize, but we're experiencing technical difficulties.")
+            logger.error(f"Simple interaction error: {e}")
+            return False
 
     def handle_call(self):
-        """Main call handler"""
+        """Main call handler with extensive fallbacks"""
         call_answered = False
         
         try:
@@ -447,44 +488,48 @@ class NetovoProductionVoiceBot:
             logger.info("Call answered successfully")
             
             # Brief pause for media setup
-            time.sleep(1)
+            self.agi.wait(1)
+
+            # Send verbose message to Asterisk
+            self.agi.verbose("NETOVO VoiceBot call handler active")
 
             # Try to initialize components
-            if not self.initialize_components():
+            if self.initialize_components():
+                logger.info("Components initialized - starting interaction")
+                
+                # Run simple interaction
+                if not self.run_simple_interaction():
+                    logger.error("Interaction failed - using basic fallback")
+                    self.play_fallback_message()
+                    self.agi.wait(3)
+            else:
                 logger.error("Component initialization failed - using fallback")
-                self.agi.verbose("VoiceBot initialization failed")
-                self.agi.stream_file("hello")
-                time.sleep(3)
-                self.agi.stream_file("goodbye")
-                return
-
-            # Send greeting
-            greeting = "Hello, thank you for calling NETOVO. I'm Alexis, your AI assistant. How can I help you today?"
-            
-            if not self.play_tts_message(greeting):
-                logger.error("Failed to play greeting - using fallback")
-                self.agi.stream_file("hello")
-                time.sleep(2)
-
-            # Start conversation
-            self.run_conversation_loop()
+                self.agi.verbose("VoiceBot components failed to initialize")
+                
+                # Basic fallback interaction
+                self.play_fallback_message()  # Play hello/beep
+                self.agi.wait(2)
+                self.play_fallback_message()  # Another sound
+                self.agi.wait(3)
 
         except Exception as e:
             logger.error(f"Call handling error: {e}")
             if call_answered:
                 try:
-                    self.play_tts_message("I apologize for the technical difficulty.")
+                    self.play_fallback_message()
+                    self.agi.wait(2)
                 except:
-                    self.agi.stream_file("pbx-invalid")
+                    pass
         
         finally:
             try:
-                time.sleep(1)
+                logger.info("Ending call")
+                self.agi.wait(1)  # Brief pause before hangup
                 if self.agi.connected:
                     self.agi.hangup()
-                logger.info("Call ended")
-            except:
-                pass
+                logger.info("Call ended gracefully")
+            except Exception as e:
+                logger.error(f"Hangup error: {e}")
 
 def main():
     """Main entry point"""
@@ -498,13 +543,13 @@ def main():
 
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        # Emergency fallback
         try:
-            # Emergency fallback
             agi = ProductionAGI()
             agi.answer()
-            agi.verbose("VoiceBot fatal error")
+            agi.verbose("VoiceBot fatal error occurred")
             agi.stream_file("pbx-invalid")
-            time.sleep(2)
+            agi.wait(2)
             agi.hangup()
         except:
             pass
