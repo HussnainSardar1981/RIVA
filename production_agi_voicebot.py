@@ -263,10 +263,10 @@ def convert_audio_for_asterisk(input_wav):
     """Convert to 8kHz mono for Asterisk"""
     try:
         timestamp = int(time.time())
-        output_path = f"/var/lib/asterisk/sounds/custom/tts_{timestamp}.wav"
+        output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
 
-        # Ensure directory exists
-        os.makedirs("/var/lib/asterisk/sounds/custom", exist_ok=True)
+        # Ensure directory exists (though root sounds should already exist)
+        os.makedirs("/var/lib/asterisk/sounds", exist_ok=True)
         logger.info(f"Converting {input_wav} to {output_path}")
 
         # Convert with sox to 16-bit PCM format (Asterisk WAV requirement)
@@ -285,7 +285,7 @@ def convert_audio_for_asterisk(input_wav):
             file_size = os.path.getsize(output_path)
             os.chmod(output_path, 0o644)
             logger.info(f"Audio converted successfully: {output_path} ({file_size} bytes)")
-            return f"custom/tts_{timestamp}"  # Return without .wav extension
+            return f"tts_{timestamp}"  # Return without .wav extension
         else:
             logger.error(f"Sox conversion failed: returncode={result.returncode}, stderr={result.stderr}")
             return None
