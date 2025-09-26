@@ -442,22 +442,24 @@ class NetovoRivaVoiceBot:
             except Exception as e:
                 logger.error(f"Conversation context initialization error: {e}")
 
-        # Determine operational mode
+        # Determine operational mode - prioritize RIVA TTS for voice generation
         active_components = sum(self.component_status.values())
         total_components = len(self.component_status)
 
-        if active_components == 0:
+        if self.component_status['riva_tts']:
+            logger.info("RIVA TTS available - full voice functionality enabled")
+            self.components_initialized = True
+            self.emergency_fallback = False
+            return True
+        elif active_components > 0:
+            logger.warning(f"Partial initialization: {active_components}/{total_components} components active - using available components")
+            self.components_initialized = True
+            self.emergency_fallback = False
+            return True
+        else:
             logger.error("No components initialized - entering emergency mode")
             self.emergency_fallback = True
             return False
-        elif active_components < total_components:
-            logger.warning(f"Partial initialization: {active_components}/{total_components} components active")
-            self.components_initialized = True
-            return True
-        else:
-            logger.info("All components initialized successfully")
-            self.components_initialized = True
-            return True
 
     def send_greeting(self):
         """Send greeting with TTS or fallback"""
@@ -561,10 +563,11 @@ class NetovoRivaVoiceBot:
             self._emergency_hangup()
 
     def _speak_response(self, text):
-        """Speak a response using available TTS or fallback"""
+        """Speak a response using RIVA TTS - prioritize voice generation"""
         try:
+            # ALWAYS try RIVA TTS first if available
             if self.component_status['riva_tts'] and self.riva_tts:
-                logger.info(f"Generating TTS for: {text[:50]}...")
+                logger.info(f"Generating RIVA TTS for: '{text[:50]}...'")
 
                 tts_file = self.riva_tts.synthesize_speech_to_file(
                     text,
@@ -572,24 +575,34 @@ class NetovoRivaVoiceBot:
                 )
 
                 if tts_file and os.path.exists(tts_file):
+                    logger.info(f"TTS file generated: {tts_file}")
                     result = self._play_wav_file(tts_file, text)
 
-                    # Cleanup
+                    # Cleanup temp file
                     try:
                         os.unlink(tts_file)
                     except:
                         pass
 
                     if "ERROR" not in result:
-                        logger.info("TTS response played successfully")
+                        logger.info("RIVA TTS response played successfully")
                         return
+                    else:
+                        logger.warning(f"TTS playback failed: {result}")
+                else:
+                    logger.error("TTS file generation failed")
 
-            # Fallback to built-in sounds
-            logger.info("Using fallback audio for response")
-            self._emergency_audio_fallback("Response audio")
+            # Only use fallback if RIVA TTS completely fails
+            logger.warning("RIVA TTS unavailable - using basic audio fallback")
+            self.agi.stream_file("beep")  # Simple acknowledgment
 
         except Exception as e:
-            logger.error(f"Error speaking response: {e}")
+            logger.error(f"Error in _speak_response: {e}")
+            # Last resort - simple beep
+            try:
+                self.agi.stream_file("beep")
+            except:
+                pass
 
     def _polite_goodbye(self, message):
         """Send polite goodbye message"""
@@ -624,20 +637,26 @@ class NetovoRivaVoiceBot:
             logger.info("Initializing components...")
             components_ready = self.initialize_components()
 
-            if self.emergency_fallback:
-                logger.warning("Running in emergency fallback mode")
+            # Skip emergency mode if we have RIVA TTS - go straight to conversation
+            if self.emergency_fallback and not self.component_status.get('riva_tts', False):
+                logger.warning("Running in emergency fallback mode - no RIVA TTS available")
                 self._run_emergency_mode()
                 # Don't return here - continue to greeting
                 logger.info("Continuing after emergency mode...")
+            elif self.component_status.get('riva_tts', False):
+                logger.info("RIVA TTS available - skipping emergency mode")
 
             # Step 3: Send greeting
             logger.info("Sending greeting...")
             if not self.send_greeting():
                 logger.warning("Greeting failed - continuing with reduced functionality")
 
-            # Step 4: Run conversation (demo mode for Milestone 2)
-            if components_ready and not self.emergency_fallback:
-                logger.info("Starting conversation with full functionality")
+            # Step 4: Run conversation - ALWAYS run full conversation if RIVA TTS available
+            if self.component_status.get('riva_tts', False):
+                logger.info("Starting RIVA-powered conversation loop")
+                self.run_conversation_loop()
+            elif components_ready:
+                logger.info("Starting conversation with available components")
                 self.run_conversation_loop()
             else:
                 logger.info("Running conversation with limited functionality")
