@@ -17,16 +17,27 @@ project_dir = "/home/aiadmin/netovo_voicebot"
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
-# Simple logging
+# Simple logging with fallback
 import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - SimpleBot - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/asterisk/voicebot.log', mode='a'),
-        logging.StreamHandler(sys.stderr)
-    ]
-)
+
+# Try to log to asterisk log, fallback to stderr only
+try:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - SimpleBot - %(message)s',
+        handlers=[
+            logging.FileHandler('/var/log/asterisk/voicebot.log', mode='a'),
+            logging.StreamHandler(sys.stderr)
+        ]
+    )
+except PermissionError:
+    # Fallback to stderr only if can't write to log file
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - SimpleBot - %(message)s',
+        handlers=[logging.StreamHandler(sys.stderr)]
+    )
+
 logger = logging.getLogger(__name__)
 
 class SimpleAGI:
@@ -258,8 +269,8 @@ def convert_audio_for_asterisk(input_wav):
         os.makedirs("/var/lib/asterisk/sounds/custom", exist_ok=True)
         logger.info(f"Converting {input_wav} to {output_path}")
 
-        # Convert with sox
-        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-b', '16', output_path]
+        # Convert with sox to μ-law format (G.711 telephony standard)
+        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-e', 'mu-law', output_path]
         logger.info(f"Sox command: {' '.join(sox_cmd)}")
 
         result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
