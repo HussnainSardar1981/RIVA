@@ -260,18 +260,32 @@ class SimpleOllamaClient:
             return "I'm having technical difficulties. How else can I help?"
 
 def convert_audio_for_asterisk(input_wav):
-    """Convert to 8kHz mono for Asterisk"""
+    """Convert to 8kHz mono SLIN16 raw format for Asterisk"""
     try:
         timestamp = int(time.time())
-        output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
+        custom_dir = "/var/lib/asterisk/sounds/custom"
+        output_path = f"{custom_dir}/tts_{timestamp}.sln16"
 
-        # Ensure directory exists (though root sounds should already exist)
-        os.makedirs("/var/lib/asterisk/sounds", exist_ok=True)
-        logger.info(f"Converting {input_wav} to {output_path}")
+        # Ensure directory exists
+        os.makedirs(custom_dir, exist_ok=True)
+        logger.info(f"Converting {input_wav} to SLIN16: {output_path}")
 
-        # Convert with sox to 16-bit PCM format (Asterisk WAV requirement)
-        sox_cmd = ['sox', input_wav, '-r', '8000', '-c', '1', '-b', '16', '-e', 'signed-integer', output_path]
-        logger.info(f"Sox command: {' '.join(sox_cmd)}")
+        # Convert to raw 16-bit signed linear PCM (SLIN16 format)
+        # -t raw = raw output (no container)
+        # -e signed-integer = signed PCM
+        # -b 16 = 16-bit depth
+        # -L = little-endian byte order
+        sox_cmd = [
+            'sox', input_wav,
+            '-r', '8000',           # 8kHz sample rate
+            '-c', '1',              # Mono
+            '-t', 'raw',            # Raw output (no WAV container)
+            '-e', 'signed-integer', # Signed PCM
+            '-b', '16',             # 16-bit
+            '-L',                   # Little-endian
+            output_path
+        ]
+        logger.info(f"Sox SLIN16 command: {' '.join(sox_cmd)}")
 
         result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
 
@@ -283,17 +297,21 @@ def convert_audio_for_asterisk(input_wav):
 
         if result.returncode == 0 and os.path.exists(output_path):
             file_size = os.path.getsize(output_path)
-            os.chmod(output_path, 0o644)
-            logger.info(f"Audio converted successfully: {output_path} ({file_size} bytes)")
-            return f"tts_{timestamp}"  # Return without .wav extension
+            if file_size > 0:
+                os.chmod(output_path, 0o644)
+                logger.info(f"SLIN16 converted successfully: {output_path} ({file_size} bytes)")
+                return f"custom/tts_{timestamp}"  # Return without .sln16 extension
+            else:
+                logger.error(f"SLIN16 file is empty: {output_path}")
+                return None
         else:
-            logger.error(f"Sox conversion failed: returncode={result.returncode}, stderr={result.stderr}")
+            logger.error(f"Sox SLIN16 conversion failed: returncode={result.returncode}, stderr={result.stderr}")
             return None
 
     except Exception as e:
         logger.error(f"Audio conversion error: {e}")
         import traceback
-        logger.error(f"Conversion traceback: {traceback.format_exc()}")
+        logger.error(f"SLIN16 traceback: {traceback.format_exc()}")
         return None
 
 def main():
