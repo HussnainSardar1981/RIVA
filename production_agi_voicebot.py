@@ -113,9 +113,9 @@ class DirectTTSClient:
             host_output = f"/tmp/tts_agi_{uuid.uuid4().hex}.wav"
             container_output = f"/tmp/riva_tts_{uuid.uuid4().hex}.wav"
 
-            # Run TTS - same command that works in your test
+            # Run TTS without sudo (AGI doesn't have terminal access)
             cmd = [
-                "sudo", "docker", "exec", self.container,
+                "docker", "exec", self.container,
                 "/opt/riva/clients/riva_tts_client",
                 f"--riva_uri=localhost:50051",
                 f"--text={text}",
@@ -132,11 +132,11 @@ class DirectTTSClient:
                 return None
 
             # Copy from container to host
-            copy_cmd = ["sudo", "docker", "cp", f"{self.container}:{container_output}", host_output]
+            copy_cmd = ["docker", "cp", f"{self.container}:{container_output}", host_output]
             copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
 
             # Cleanup container file
-            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_output],
+            subprocess.run(["docker", "exec", self.container, "rm", "-f", container_output],
                           capture_output=True)
 
             if copy_result.returncode == 0 and os.path.exists(host_output):
@@ -163,7 +163,7 @@ class DirectASRClient:
             container_path = f"/tmp/riva_asr_{uuid.uuid4().hex}.wav"
 
             # Copy to container
-            copy_cmd = ["sudo", "docker", "cp", audio_file, f"{self.container}:{container_path}"]
+            copy_cmd = ["docker", "cp", audio_file, f"{self.container}:{container_path}"]
             copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
 
             if copy_result.returncode != 0:
@@ -172,7 +172,7 @@ class DirectASRClient:
 
             # Run ASR
             cmd = [
-                "sudo", "docker", "exec", self.container,
+                "docker", "exec", self.container,
                 "/opt/riva/clients/riva_streaming_asr_client",
                 f"--riva_uri=localhost:50051",
                 f"--audio_file={container_path}",
@@ -183,7 +183,7 @@ class DirectASRClient:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             # Cleanup
-            subprocess.run(["sudo", "docker", "exec", self.container, "rm", "-f", container_path],
+            subprocess.run(["docker", "exec", self.container, "rm", "-f", container_path],
                           capture_output=True)
 
             if result.returncode == 0:
