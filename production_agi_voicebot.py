@@ -319,6 +319,10 @@ class NetovoAIClient:
 
         self.conversation_manager = NetovoConversationManager()
         self.ollama_client = NetovoOllamaClient()
+
+        # Set the system prompt from conversation manager
+        self.ollama_client.set_system_prompt(self.conversation_manager.get_netovo_prompt())
+
         self.call_start_time = time.time()
 
     def get_greeting(self):
