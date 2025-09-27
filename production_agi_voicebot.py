@@ -100,13 +100,18 @@ class SimpleAGI:
         if '.' in filename:
             filename = filename.rsplit('.', 1)[0]
 
-        # Log what we're trying to play
-        full_path = f"/var/lib/asterisk/sounds/{filename}.wav"
-        if os.path.exists(full_path):
-            file_size = os.path.getsize(full_path)
-            logger.info(f"Attempting to play: {filename} (file exists: {file_size} bytes)")
+        # Log what we're trying to play (check for both .sln16 and .wav)
+        sln16_path = f"/var/lib/asterisk/sounds/{filename}.sln16"
+        wav_path = f"/var/lib/asterisk/sounds/{filename}.wav"
+
+        if os.path.exists(sln16_path):
+            file_size = os.path.getsize(sln16_path)
+            logger.info(f"Attempting to play SLIN16: {filename} (file exists: {file_size} bytes)")
+        elif os.path.exists(wav_path):
+            file_size = os.path.getsize(wav_path)
+            logger.info(f"Attempting to play WAV: {filename} (file exists: {file_size} bytes)")
         else:
-            logger.error(f"Audio file not found: {full_path}")
+            logger.error(f"Audio file not found: {sln16_path} or {wav_path}")
 
         result = self.command(f'STREAM FILE {filename} ""')
         success = result and result.startswith('200')
