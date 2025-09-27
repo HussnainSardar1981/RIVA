@@ -509,8 +509,12 @@ def main():
                 if agi.stream_file(fallback):
                     break
 
-        # Simple conversation loop
-        for turn in range(3):
+        # Conversation loop - continue until user hangs up or explicit exit
+        max_turns = 50  # Safety limit - about 20-25 minutes
+        failed_interactions = 0
+        start_time = time.time()
+
+        for turn in range(max_turns):
             logger.info(f"Conversation turn {turn + 1}")
 
             # Record user input
@@ -530,15 +534,35 @@ def main():
 
                         if transcript:
                             logger.info(f"User said: {transcript}")
+                            failed_interactions = 0  # Reset counter on successful interaction
 
-                            # Check for exit
-                            if any(word in transcript.lower() for word in ['bye', 'goodbye', 'thank you']):
+                            # Check for USER exit intents (not AI responses)
+                            user_exit_phrases = [
+                                'goodbye', 'good bye', 'bye', 'bye bye',
+                                'that\'s all', 'that is all', 'nothing else',
+                                'you\'ve helped me', 'problem solved', 'all set',
+                                'transfer me', 'human agent', 'speak to someone',
+                                'i\'m done', 'we\'re done', 'finished'
+                            ]
+
+                            # Check for emergency/urgent
+                            urgent_phrases = ['emergency', 'urgent', 'critical']
+
+                            if any(phrase in transcript.lower() for phrase in user_exit_phrases):
                                 response = "Thank you for calling NETOVO. Have a great day!"
+                                # This will trigger exit after response
+                            elif any(phrase in transcript.lower() for phrase in urgent_phrases):
+                                response = "I understand this is urgent. Let me transfer you to our priority support team immediately."
+                                # This will trigger exit after response
                             else:
-                                # Get AI response
+                                # Normal AI response
                                 response = ollama.generate(transcript)
                         else:
-                            response = "I didn't catch that. Could you repeat?"
+                            failed_interactions += 1
+                            if failed_interactions >= 3:
+                                response = "I'm having trouble hearing you clearly. Let me transfer you to a human agent who can better assist you."
+                            else:
+                                response = "I didn't catch that. Could you repeat?"
                     else:
                         response = "I didn't hear anything. Could you speak up?"
 
@@ -577,8 +601,26 @@ def main():
                     if agi.stream_file(fallback):
                         break
 
-            # Check for exit
-            if 'thank you' in response.lower() or 'great day' in response.lower():
+            # Check for exit conditions
+            # 1. User requested goodbye/transfer (AI responds with farewell)
+            if 'thank you for calling' in response.lower() or 'transfer you' in response.lower():
+                logger.info("User requested exit - ending conversation")
+                break
+
+            # 2. Too many failed interactions
+            if failed_interactions >= 3:
+                logger.info("Too many failed interactions - ending conversation")
+                break
+
+            # 3. Maximum conversation time (15 minutes)
+            if time.time() - start_time > 900:  # 15 minutes
+                logger.info("Maximum conversation time reached - ending conversation")
+                agi.stream_file("demo-thanks")  # Quick goodbye
+                break
+
+            # 4. Check if call is still connected
+            if not agi.connected:
+                logger.info("Call disconnected - ending conversation")
                 break
 
             agi.sleep(1)
