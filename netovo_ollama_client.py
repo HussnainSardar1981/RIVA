@@ -1,7 +1,7 @@
 #!/home/aiadmin/netovo_voicebot/venv/bin/python3
 """
 NETOVO Professional Ollama Client
-Integrates the NETOVO conversation system with Ollama LLM
+Integrates the NETOVO conversation system with Ollama LLM using comprehensive prompt-based logic
 """
 
 import logging
@@ -11,60 +11,23 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 class NetovoOllamaClient:
-    """Professional NETOVO-enhanced Ollama client"""
+    """Professional NETOVO-enhanced Ollama client with comprehensive prompt-based conversation logic"""
 
     def __init__(self, model="orca2:7b", base_url="http://localhost:11434"):
         self.model = model
         self.base_url = base_url
         self.conversation_history = []
 
-        # NETOVO System Prompt - Adapted from NETOVO.json
-        self.system_prompt = """[Identity]
-You are Alexis, a highly efficient and professional IT Support Assistant for Netovo. You are the first point of contact for all inbound technical support calls. Your sole purpose is to rapidly understand the user's issue, provide immediate troubleshooting assistance from your knowledge base, and escalate complex or urgent issues to a live technician without delay. You are clear, direct, and resolution-focused.
+        # Import the conversation manager to get the comprehensive prompt
+        from netovo_conversation_manager import NetovoConversationManager
+        self.conversation_manager = NetovoConversationManager()
+        self.system_prompt = self.conversation_manager.get_netovo_prompt()
 
-[Your Style - "The Efficient Problem-Solver"]
-- Tone: Calm, professional, direct, and competent. You instill confidence through efficiency, not small talk.
-- Language: Clear, concise technical language, simplified for the user. Use action-oriented phrases.
-- Conciseness: Strictly 1-2 short, impactful sentences per reply. The focus is on providing an instruction or asking a clarifying question to move forward.
-- Be conversational but professional: You can use contractions and natural speech patterns since this is a phone conversation.
-
-[Core Approach]
-- Language: You conduct all conversations in clear, professional English.
-- Direct Triage: Your first step is to listen to the user's problem and immediately classify it.
-- Immediate Action: You move directly from classification to either troubleshooting or escalation. No unnecessary conversational layers.
-- Knowledge Base Adherence: You only attempt to solve issues explicitly in your knowledge base.
-
-[Key Instructions]
-- Efficiency is Priority: Your primary function is speed to resolution. Acknowledge the issue and immediately begin troubleshooting or escalation.
-- Avoid Conversational Fillers: Do not explain what their issue means or offer unnecessary empathy statements unless their tone is highly distressed. The best empathy is efficient action.
-- Be a Guide, Not a Chatter: Your role is to give clear, one-at-a-time instructions or ask direct clarifying questions.
-- Confirm Understanding: Always summarize the next step when ending or transferring.
-- Ask for More Help: Always ask if there's anything else they need before ending the call.
-
-[Technical Knowledge Areas You Can Handle]
-1. Wi-Fi/Internet Connection Issues
-2. Slow Computer Performance
-3. Keyboard/Mouse Problems
-4. VPN Connection Issues
-5. Printer Problems
-6. Password Reset Requests
-7. Multi-Factor Authentication Issues
-8. Email/Outlook Synchronization
-9. Remote Desktop Access Problems
-
-[Issues Requiring Immediate Escalation]
-- Hardware installation/replacement
-- Software licensing issues
-- Network/server configuration
-- Security breaches or emergencies
-- Account management beyond password resets
-- Any issue you cannot resolve with basic troubleshooting
-
-[Response Format]
-Keep responses to 1-2 sentences maximum. Be direct and actionable. Since this is a phone conversation, speak naturally but professionally."""
-
-    def generate_response(self, user_input: str, context: str = "") -> str:
-        """Generate professional NETOVO-style response using Ollama"""
+    def generate_response(self, user_input: str, context: str = "") -> Tuple[str, bool, bool]:
+        """
+        Generate professional NETOVO response using comprehensive prompt-based logic
+        Returns: (response_text, should_transfer, should_end)
+        """
         try:
             # Build conversation context
             messages = [
@@ -90,7 +53,7 @@ Keep responses to 1-2 sentences maximum. Be direct and actionable. Since this is
                 "messages": messages,
                 "stream": False,
                 "options": {
-                    "num_predict": 100,  # Keep responses short
+                    "num_predict": 150,  # Allow for ACTION/RESPONSE format
                     "temperature": 0.1,  # Keep responses consistent
                     "top_p": 0.9,
                     "stop": ["\n\n", "User:", "Assistant:"]  # Stop at natural breaks
@@ -104,31 +67,81 @@ Keep responses to 1-2 sentences maximum. Be direct and actionable. Since this is
                 result = response.json()
                 ai_response = result["message"]["content"].strip()
 
+                # Parse ACTION/RESPONSE format
+                response_text, should_transfer, should_end = self._parse_ai_response(ai_response)
+
                 # Clean up response
-                ai_response = self._clean_response(ai_response)
+                response_text = self._clean_response(response_text)
 
                 # Add to conversation history
                 self.conversation_history.append({"role": "user", "content": user_input})
-                self.conversation_history.append({"role": "assistant", "content": ai_response})
+                self.conversation_history.append({"role": "assistant", "content": response_text})
 
                 # Keep history manageable
                 if len(self.conversation_history) > 12:
                     self.conversation_history = self.conversation_history[-8:]
 
-                logger.info(f"NETOVO AI response: {ai_response[:100]}")
-                return ai_response
+                logger.info(f"NETOVO AI response: {response_text[:100]}")
+                logger.info(f"Action parsed - Transfer: {should_transfer}, End: {should_end}")
+
+                return response_text, should_transfer, should_end
 
         except Exception as e:
             logger.error(f"Ollama error: {e}")
-            return "I'm experiencing technical difficulties. Let me transfer you to our support team for immediate assistance."
+            return "I'm experiencing technical difficulties. Let me transfer you to our support team for immediate assistance.", True, False
+
+    def _parse_ai_response(self, ai_response: str) -> Tuple[str, bool, bool]:
+        """
+        Parse the AI response in ACTION/RESPONSE format
+        Returns: (response_text, should_transfer, should_end)
+        """
+        should_transfer = False
+        should_end = False
+        response_text = ai_response
+
+        try:
+            # Look for ACTION: and RESPONSE: format
+            if "ACTION:" in ai_response and "RESPONSE:" in ai_response:
+                lines = ai_response.split('\n')
+                action_line = ""
+                response_line = ""
+
+                for line in lines:
+                    if line.startswith("ACTION:"):
+                        action_line = line.replace("ACTION:", "").strip().lower()
+                    elif line.startswith("RESPONSE:"):
+                        response_line = line.replace("RESPONSE:", "").strip()
+
+                if action_line and response_line:
+                    response_text = response_line
+
+                    # Parse actions
+                    if "transfer" in action_line:
+                        should_transfer = True
+                    elif "end_call" in action_line:
+                        should_end = True
+                    elif "send_sms" in action_line:
+                        # For now, treat SMS as continue (we'll add SMS functionality later)
+                        pass
+                    # "continue" is default - no flags set
+
+            logger.info(f"Parsed action - Transfer: {should_transfer}, End: {should_end}")
+
+        except Exception as e:
+            logger.error(f"Error parsing AI response: {e}")
+            # Fallback to original response
+            response_text = ai_response
+
+        return response_text, should_transfer, should_end
 
     def _clean_response(self, response: str) -> str:
         """Clean and optimize the AI response for phone conversation"""
         # Remove any markdown or formatting
         response = response.replace("**", "").replace("*", "")
 
-        # Remove any system-like responses
+        # Remove any system-like responses or action indicators
         response = response.replace("Assistant:", "").replace("Alexis:", "")
+        response = response.replace("ACTION:", "").replace("RESPONSE:", "")
 
         # Ensure it ends properly
         response = response.strip()
@@ -144,7 +157,7 @@ Keep responses to 1-2 sentences maximum. Be direct and actionable. Since this is
 
     def generate_greeting(self) -> str:
         """Generate the standard NETOVO greeting"""
-        return "Thank you for calling Netovo Support. This is Alexis. What's the issue you're experiencing today?"
+        return self.conversation_manager.get_greeting()
 
     def generate_escalation_response(self, reason: str = "technical") -> str:
         """Generate appropriate escalation response"""
