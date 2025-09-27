@@ -237,6 +237,11 @@ class DirectASRClient:
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
+            # DEBUG: Log everything RIVA returns
+            logger.info(f"RIVA ASR returncode: {result.returncode}")
+            logger.info(f"RIVA ASR stdout: {repr(result.stdout)}")
+            logger.info(f"RIVA ASR stderr: {repr(result.stderr)}")
+
             # Cleanup
             subprocess.run(["docker", "exec", self.container, "rm", "-f", container_path],
                           capture_output=True)
@@ -246,10 +251,32 @@ class DirectASRClient:
                 pass
 
             if result.returncode == 0:
-                # Parse transcript
-                lines = result.stdout.strip().split('\n')
-                for line in lines:
-                    if '"' in line and not 'Throughput' in line:
+                # Parse transcript - ENHANCED
+                full_output = result.stdout.strip()
+                logger.info(f"Full RIVA output: {full_output}")
+
+                if not full_output:
+                    logger.warning("RIVA returned empty output")
+                    return ""
+
+                lines = full_output.split('\n')
+                logger.info(f"RIVA output lines: {len(lines)}")
+
+                for i, line in enumerate(lines):
+                    logger.info(f"Line {i}: {repr(line)}")
+
+                    # Look for transcript in different formats
+                    if '"transcript"' in line.lower() or '"text"' in line.lower():
+                        import re
+                        # Try JSON-like parsing
+                        quotes = re.findall(r'"([^"]*)"', line)
+                        for quote in quotes:
+                            if quote.strip() and len(quote.strip()) > 2 and quote.lower() not in ['transcript', 'text']:
+                                logger.info(f"Found transcript: {quote.strip()}")
+                                return quote.strip()
+
+                    # Original parsing method
+                    elif '"' in line and 'throughput' not in line.lower():
                         import re
                         quotes = re.findall(r'"([^"]*)"', line)
                         for quote in quotes:
@@ -257,7 +284,24 @@ class DirectASRClient:
                                 logger.info(f"ASR result: {quote.strip()}")
                                 return quote.strip()
 
-            logger.warning("No transcript found")
+                # Try alternative parsing - look for any text after "transcript" or "text"
+                for line in lines:
+                    if 'transcript' in line.lower() or 'final' in line.lower():
+                        # Extract any meaningful text from the line
+                        import re
+                        # Remove common non-speech words
+                        cleaned = re.sub(r'(transcript|final|result|confidence|throughput)', '', line, flags=re.IGNORECASE)
+                        words = re.findall(r'\b[a-zA-Z]{3,}\b', cleaned)
+                        if words:
+                            transcript = ' '.join(words)
+                            logger.info(f"Alternative parsing result: {transcript}")
+                            return transcript
+
+            else:
+                logger.error(f"RIVA ASR failed with returncode: {result.returncode}")
+                logger.error(f"RIVA stderr: {result.stderr}")
+
+            logger.warning("No transcript found after all parsing attempts")
             return ""
 
         except Exception as e:
