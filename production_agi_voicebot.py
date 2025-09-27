@@ -340,26 +340,13 @@ class NetovoAIClient:
                 user_input, phone_number
             )
 
-            # For complex issues, enhance with Ollama
-            if action == "continue" and "troubleshooting" in self.conversation_manager.conversation_state:
-                # Add AI enhancement for better user experience
-                context = f"Issue category: {self.conversation_manager.current_issue}, Step: {self.conversation_manager.troubleshooting_step}"
-                enhanced_response = self.ollama_client.generate_response(user_input, context)
-
-                # Combine structured response with AI enhancement if needed
-                if len(response.split()) < 5:  # If response is too short, enhance it
-                    response = enhanced_response
-                else:
-                    # Use the structured response (it's already comprehensive)
-                    pass
-
-            elif action == "continue":
-                # For general conversation, use AI
-                response = self.ollama_client.generate_response(user_input)
-
-            # Determine actions
-            should_transfer = action == "transfer"
-            should_end = action == "end_call"
+            # Use AI for all conversation logic with comprehensive prompt
+            if action == "continue":
+                response, should_transfer, should_end = self.ollama_client.generate_response(user_input)
+            else:
+                # Handle direct actions from conversation manager
+                should_transfer = action == "transfer"
+                should_end = action == "end_call"
 
             # Check for user wanting to end conversation
             if self.conversation_manager.should_end_conversation(user_input):
@@ -380,7 +367,7 @@ class NetovoAIClient:
         duration = int(time.time() - self.call_start_time)
         ai_summary = self.ollama_client.get_conversation_summary()
 
-        return f"Call duration: {duration}s, State: {self.conversation_manager.conversation_state}, Summary: {ai_summary}"
+        return f"Call duration: {duration}s, Summary: {ai_summary}"
 
     def reset_for_new_call(self):
         """Reset for new call"""
