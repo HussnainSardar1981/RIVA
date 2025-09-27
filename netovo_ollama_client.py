@@ -17,11 +17,11 @@ class NetovoOllamaClient:
         self.model = model
         self.base_url = base_url
         self.conversation_history = []
+        self.system_prompt = None  # Will be set by NetovoAIClient
 
-        # Import the conversation manager to get the comprehensive prompt
-        from netovo_conversation_manager import NetovoConversationManager
-        self.conversation_manager = NetovoConversationManager()
-        self.system_prompt = self.conversation_manager.get_netovo_prompt()
+    def set_system_prompt(self, prompt: str):
+        """Set the system prompt from conversation manager"""
+        self.system_prompt = prompt
 
     def generate_response(self, user_input: str, context: str = "") -> Tuple[str, bool, bool]:
         """
@@ -157,7 +157,7 @@ class NetovoOllamaClient:
 
     def generate_greeting(self) -> str:
         """Generate the standard NETOVO greeting"""
-        return self.conversation_manager.get_greeting()
+        return "Thank you for calling Netovo Support. This is Alexis. What's the issue you're experiencing today?"
 
     def generate_escalation_response(self, reason: str = "technical") -> str:
         """Generate appropriate escalation response"""
