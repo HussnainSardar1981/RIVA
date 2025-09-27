@@ -306,74 +306,37 @@ class DirectASRClient:
             logger.error(f"ASR error: {e}")
             return ""
 
-class NetovoAIClient:
-    """Professional NETOVO AI client with full conversation management"""
+class SimpleOllamaClient:
+    """Simple Ollama client"""
 
     def __init__(self):
-        # Import the NETOVO conversation manager
-        import sys
-        sys.path.append('/home/aiadmin/netovo_voicebot')
+        pass
 
-        from netovo_conversation_manager import NetovoConversationManager
-        from netovo_ollama_client import NetovoOllamaClient
-
-        self.conversation_manager = NetovoConversationManager()
-        self.ollama_client = NetovoOllamaClient()
-
-        # Set the system prompt from conversation manager
-        self.ollama_client.set_system_prompt(self.conversation_manager.get_netovo_prompt())
-
-        self.call_start_time = time.time()
-
-    def get_greeting(self):
-        """Get professional NETOVO greeting"""
-        return self.ollama_client.generate_greeting()
-
-    def generate_response(self, user_input: str, phone_number: str = None) -> tuple:
-        """
-        Generate professional NETOVO response
-        Returns: (response_text, should_transfer, should_end)
-        """
+    def generate(self, prompt, max_tokens=50):
+        """Generate response"""
         try:
-            # Use conversation manager for intelligent routing
-            response, action = self.conversation_manager.generate_response(
-                user_input, phone_number
-            )
+            import httpx
 
-            # Use AI for all conversation logic with comprehensive prompt
-            if action == "continue":
-                response, should_transfer, should_end = self.ollama_client.generate_response(user_input)
-            else:
-                # Handle direct actions from conversation manager
-                should_transfer = action == "transfer"
-                should_end = action == "end_call"
+            payload = {
+                "model": "orca2:7b",
+                "prompt": f"You are Alexis, NETOVO customer support AI. Keep responses under 30 words.\n\nHuman: {prompt}\n\nAssistant:",
+                "stream": False,
+                "options": {"num_predict": max_tokens, "temperature": 0.1}
+            }
 
-            # Check for user wanting to end conversation
-            if self.conversation_manager.should_end_conversation(user_input):
-                response = self.ollama_client.generate_closing_response()
-                should_end = True
+            with httpx.Client(timeout=15.0) as client:
+                response = client.post("http://localhost:11434/api/generate", json=payload)
+                response.raise_for_status()
 
-            logger.info(f"NETOVO AI response: {response[:100]}")
-            logger.info(f"Action: {action}, Transfer: {should_transfer}, End: {should_end}")
+                result = response.json()
+                text = result.get("response", "").strip()
 
-            return response, should_transfer, should_end
+                logger.info(f"Ollama response: {text[:50]}")
+                return text
 
         except Exception as e:
-            logger.error(f"NETOVO AI error: {e}")
-            return "I'm experiencing technical difficulties. Let me transfer you to our support team for immediate assistance.", True, False
-
-    def get_conversation_summary(self):
-        """Get conversation summary for logging"""
-        duration = int(time.time() - self.call_start_time)
-        ai_summary = self.ollama_client.get_conversation_summary()
-
-        return f"Call duration: {duration}s, Summary: {ai_summary}"
-
-    def reset_for_new_call(self):
-        """Reset for new call"""
-        self.conversation_manager = NetovoConversationManager()
-        self.ollama_client.reset_conversation()
-        self.call_start_time = time.time()
+            logger.error(f"Ollama error: {e}")
+            return "I'm having technical difficulties. How else can I help?"
 
 def convert_audio_for_asterisk(input_wav):
     """Convert to exact Asterisk-compatible format"""
@@ -510,17 +473,14 @@ def main():
         agi.sleep(1)
         agi.verbose("Fixed VoiceBot Active")
 
-        # Initialize NETOVO professional components
+        # Initialize components
         tts = DirectTTSClient()
         asr = DirectASRClient()
-        netovo_ai = NetovoAIClient()
+        ollama = SimpleOllamaClient()
 
-        # Send professional NETOVO greeting
-        logger.info("Generating NETOVO professional greeting...")
-        greeting_text = netovo_ai.get_greeting()
-
-        # Extract caller phone number for context
-        caller_phone = agi.env.get('agi_callerid', 'Unknown')
+        # Send greeting
+        logger.info("Generating greeting...")
+        greeting_text = "Hello, thank you for calling NETOVO. I'm Alexis. How can I help you?"
 
         tts_file = tts.synthesize(greeting_text)
 
@@ -588,32 +548,23 @@ def main():
                             # Check for emergency/urgent
                             urgent_phrases = ['emergency', 'urgent', 'critical']
 
-                            # Generate professional NETOVO response
-                            response, should_transfer, should_end = netovo_ai.generate_response(
-                                transcript, caller_phone
-                            )
-
-                            # Override with exit checks
                             if any(phrase in transcript.lower() for phrase in user_exit_phrases):
-                                response = netovo_ai.generate_closing_response()
-                                should_end = True
+                                response = "Thank you for calling NETOVO. Have a great day!"
+                                # This will trigger exit after response
                             elif any(phrase in transcript.lower() for phrase in urgent_phrases):
                                 response = "I understand this is urgent. Let me transfer you to our priority support team immediately."
-                                should_transfer = True
+                                # This will trigger exit after response
+                            else:
+                                # Normal AI response
+                                response = ollama.generate(transcript)
                         else:
                             failed_interactions += 1
                             if failed_interactions >= 3:
                                 response = "I'm having trouble hearing you clearly. Let me transfer you to a human agent who can better assist you."
-                                should_transfer = True
-                                should_end = False
                             else:
                                 response = "I didn't catch that. Could you repeat?"
-                                should_transfer = False
-                                should_end = False
                     else:
                         response = "I didn't hear anything. Could you speak up?"
-                        should_transfer = False
-                        should_end = False
 
                     # Cleanup recording
                     try:
@@ -622,12 +573,8 @@ def main():
                         pass
                 else:
                     response = "Recording failed. Let me try again."
-                    should_transfer = False
-                    should_end = False
             else:
                 response = "I'm having trouble hearing you."
-                should_transfer = False
-                should_end = False
 
             # Speak response
             logger.info(f"Responding: {response[:30]}...")
@@ -654,38 +601,29 @@ def main():
                     if agi.stream_file(fallback):
                         break
 
-            # Check for exit conditions based on NETOVO AI response
-            # 1. AI determined call should end
-            if should_end:
-                logger.info("NETOVO AI determined call should end")
+            # Check for exit conditions
+            # 1. User requested goodbye/transfer (AI responds with farewell)
+            if 'thank you for calling' in response.lower() or 'transfer you' in response.lower():
+                logger.info("User requested exit - ending conversation")
                 break
 
-            # 2. AI determined transfer is needed
-            if should_transfer:
-                logger.info("NETOVO AI requested transfer - ending conversation")
-                break
-
-            # 3. Too many failed interactions
+            # 2. Too many failed interactions
             if failed_interactions >= 3:
                 logger.info("Too many failed interactions - ending conversation")
                 break
 
-            # 4. Maximum conversation time (15 minutes)
+            # 3. Maximum conversation time (15 minutes)
             if time.time() - start_time > 900:  # 15 minutes
                 logger.info("Maximum conversation time reached - ending conversation")
                 agi.stream_file("demo-thanks")  # Quick goodbye
                 break
 
-            # 5. Check if call is still connected
+            # 4. Check if call is still connected
             if not agi.connected:
                 logger.info("Call disconnected - ending conversation")
                 break
 
             agi.sleep(1)
-
-        # Log conversation summary
-        summary = netovo_ai.get_conversation_summary()
-        logger.info(f"Conversation Summary: {summary}")
 
         # End call
         logger.info("Ending call")
