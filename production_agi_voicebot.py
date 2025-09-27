@@ -100,8 +100,8 @@ class SimpleAGI:
             filename = filename.rsplit('.', 1)[0]
 
         # Check for both WAV and SLIN16 files in root sounds directory
-        wav_path = f"/var/lib/asterisk/sounds/{filename}.wav"
-        sln16_path = f"/var/lib/asterisk/sounds/{filename}.sln16"
+        wav_path = f"/usr/share/asterisk/sounds/{filename}.wav"
+        sln16_path = f"/usr/share/asterisk/sounds/{filename}.sln16"
 
         if os.path.exists(wav_path):
             file_size = os.path.getsize(wav_path)
@@ -284,7 +284,7 @@ def convert_audio_for_asterisk(input_wav):
             },
             {
                 'ext': 'sln16', 
-                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.sln16",
+                'path': f"/usr/share/asterisk/sounds/tts_{timestamp}.sln16",
                 'sox_args': [
                     'sox', input_wav,
                     '-r', '8000',      # 8kHz 
@@ -296,7 +296,7 @@ def convert_audio_for_asterisk(input_wav):
             },
             {
                 'ext': 'gsm',
-                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.gsm", 
+                'path': f"/usr/share/asterisk/sounds/tts_{timestamp}.gsm", 
                 'sox_args': [
                     'sox', input_wav,
                     '-r', '8000',      # 8kHz
@@ -350,7 +350,7 @@ def convert_audio_for_asterisk(input_wav):
                     break
                     
             if template_file:
-                output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
+                output_path = f"/usr/share/asterisk/sounds/tts_{timestamp}.wav"
                 
                 # Use sox to match the exact format of the working template
                 sox_cmd = [
