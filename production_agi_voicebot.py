@@ -119,7 +119,7 @@ class SimpleAGI:
 
     def record_file(self, filename):
         """Record audio - SIMPLE syntax"""
-        result = self.command(f'RECORD FILE {filename} wav "#" 8000')
+        result = self.command(f'RECORD FILE {filename} wav "#" 8000 10 0 BEEP')
         return result and result.startswith('200')
 
     def sleep(self, seconds):
@@ -184,12 +184,41 @@ class DirectASRClient:
         self.container = container
 
     def transcribe_file(self, audio_file):
-        """Direct ASR transcription using Docker"""
+        """Direct ASR transcription using Docker with format conversion"""
         try:
             container_path = f"/tmp/riva_asr_{uuid.uuid4().hex}.wav"
+            converted_path = f"/tmp/converted_{uuid.uuid4().hex}.wav"
 
-            # Copy to container
-            copy_cmd = ["docker", "cp", audio_file, f"{self.container}:{container_path}"]
+            # Convert audio to RIVA-compatible format (16kHz, mono, 16-bit)
+            sox_cmd = [
+                'sox', audio_file,
+                '-r', '16000',    # 16kHz (RIVA preferred)
+                '-c', '1',        # Mono
+                '-b', '16',       # 16-bit
+                '-e', 'signed-integer',  # PCM
+                converted_path
+            ]
+
+            logger.info(f"Converting audio for ASR: {' '.join(sox_cmd)}")
+            convert_result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
+
+            if convert_result.returncode != 0:
+                logger.error(f"Audio conversion failed: {convert_result.stderr}")
+                return ""
+
+            # Check converted file size
+            if os.path.exists(converted_path):
+                file_size = os.path.getsize(converted_path)
+                logger.info(f"Converted audio file: {file_size} bytes")
+                if file_size < 1000:
+                    logger.error("Converted file too small")
+                    return ""
+            else:
+                logger.error("Converted file not created")
+                return ""
+
+            # Copy converted file to container
+            copy_cmd = ["docker", "cp", converted_path, f"{self.container}:{container_path}"]
             copy_result = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=10)
 
             if copy_result.returncode != 0:
@@ -211,6 +240,10 @@ class DirectASRClient:
             # Cleanup
             subprocess.run(["docker", "exec", self.container, "rm", "-f", container_path],
                           capture_output=True)
+            try:
+                os.unlink(converted_path)
+            except:
+                pass
 
             if result.returncode == 0:
                 # Parse transcript
