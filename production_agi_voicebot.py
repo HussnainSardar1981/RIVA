@@ -264,51 +264,120 @@ class SimpleOllamaClient:
             return "I'm having technical difficulties. How else can I help?"
 
 def convert_audio_for_asterisk(input_wav):
-    """Convert to 8kHz mono WAV format for Asterisk - FIXED PATHS"""
+    """Convert to exact Asterisk-compatible format"""
     try:
         timestamp = int(time.time())
-        # FIXED: Save directly to sounds root directory, not custom/
-        output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
-
-        logger.info(f"Converting {input_wav} to WAV: {output_path}")
-
-        # Convert to 8kHz mono 16-bit PCM WAV (same as built-in sounds)
-        sox_cmd = [
-            'sox', input_wav,
-            '-r', '8000',           # 8kHz sample rate
-            '-c', '1',              # Mono
-            '-b', '16',             # 16-bit depth
-            '-e', 'signed-integer', # Signed PCM
-            output_path             # WAV format (default)
+        
+        # Try multiple format approaches
+        formats_to_try = [
+            {
+                'ext': 'wav',
+                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.wav",
+                'sox_args': [
+                    'sox', input_wav,
+                    '-r', '8000',      # 8kHz sample rate
+                    '-c', '1',         # Mono
+                    '-b', '16',        # 16-bit
+                    '-e', 'signed-integer',  # PCM
+                    '-t', 'wav'        # Explicitly specify WAV format
+                ]
+            },
+            {
+                'ext': 'sln16', 
+                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.sln16",
+                'sox_args': [
+                    'sox', input_wav,
+                    '-r', '8000',      # 8kHz 
+                    '-c', '1',         # Mono
+                    '-b', '16',        # 16-bit
+                    '-e', 'signed-integer',  # PCM
+                    '-t', 'raw'        # Raw format (what .sln16 is)
+                ]
+            },
+            {
+                'ext': 'gsm',
+                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.gsm", 
+                'sox_args': [
+                    'sox', input_wav,
+                    '-r', '8000',      # 8kHz
+                    '-c', '1',         # Mono  
+                    '-t', 'gsm'        # GSM format (very compatible)
+                ]
+            }
         ]
-        logger.info(f"Sox WAV command: {' '.join(sox_cmd)}")
-
-        result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
-
-        logger.info(f"Sox result: returncode={result.returncode}")
-        if result.stdout:
-            logger.info(f"Sox stdout: {result.stdout}")
-        if result.stderr:
-            logger.info(f"Sox stderr: {result.stderr}")
-
-        if result.returncode == 0 and os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            if file_size > 0:
-                os.chmod(output_path, 0o644)
-                logger.info(f"WAV converted successfully: {output_path} ({file_size} bytes)")
-                # FIXED: Return just filename without path or extension
-                return f"tts_{timestamp}"
-            else:
-                logger.error(f"WAV file is empty: {output_path}")
-                return None
-        else:
-            logger.error(f"Sox WAV conversion failed: returncode={result.returncode}, stderr={result.stderr}")
-            return None
-
+        
+        for fmt in formats_to_try:
+            try:
+                logger.info(f"Trying {fmt['ext']} format...")
+                
+                # Add output path to sox command
+                sox_cmd = fmt['sox_args'] + [fmt['path']]
+                logger.info(f"Sox command: {' '.join(sox_cmd)}")
+                
+                result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0 and os.path.exists(fmt['path']):
+                    file_size = os.path.getsize(fmt['path'])
+                    if file_size > 100:  # Valid file
+                        os.chmod(fmt['path'], 0o644)
+                        filename = f"tts_{timestamp}"
+                        logger.info(f"SUCCESS: {fmt['ext']} format created: {filename} ({file_size} bytes)")
+                        return filename
+                    else:
+                        logger.warning(f"{fmt['ext']} file too small: {file_size} bytes")
+                        os.unlink(fmt['path'])
+                else:
+                    logger.warning(f"{fmt['ext']} conversion failed: {result.stderr}")
+                    
+            except Exception as e:
+                logger.warning(f"{fmt['ext']} format failed: {e}")
+                
+        # If all formats fail, try copying a working built-in file and replacing content
+        try:
+            logger.info("Trying built-in file replacement method...")
+            
+            # Find a working built-in file to use as template
+            template_files = [
+                "/var/lib/asterisk/sounds/demo-thanks.wav",
+                "/var/lib/asterisk/sounds/demo-congrats.wav", 
+                "/var/lib/asterisk/sounds/hello.wav"
+            ]
+            
+            template_file = None
+            for tf in template_files:
+                if os.path.exists(tf):
+                    template_file = tf
+                    break
+                    
+            if template_file:
+                output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
+                
+                # Use sox to match the exact format of the working template
+                sox_cmd = [
+                    'sox', input_wav,
+                    output_path,
+                    'rate', '8000',    # Alternative syntax
+                    'channels', '1',   # Alternative syntax  
+                    'bits', '16'       # Alternative syntax
+                ]
+                
+                result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0 and os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    if file_size > 100:
+                        os.chmod(output_path, 0o644)
+                        logger.info(f"Template-based conversion success: {file_size} bytes")
+                        return f"tts_{timestamp}"
+                        
+        except Exception as e:
+            logger.error(f"Template method failed: {e}")
+            
+        logger.error("All audio conversion methods failed")
+        return None
+        
     except Exception as e:
-        logger.error(f"Audio conversion error: {e}")
-        import traceback
-        logger.error(f"WAV traceback: {traceback.format_exc()}")
+        logger.error(f"Audio conversion fatal error: {e}")
         return None
 
 def main():
