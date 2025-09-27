@@ -262,40 +262,38 @@ class DirectASRClient:
                 lines = full_output.split('\n')
                 logger.info(f"RIVA output lines: {len(lines)}")
 
+                # Look for RIVA's final transcript format: "0 : [transcript]"
                 for i, line in enumerate(lines):
                     logger.info(f"Line {i}: {repr(line)}")
 
-                    # Look for transcript in different formats
-                    if '"transcript"' in line.lower() or '"text"' in line.lower():
-                        import re
-                        # Try JSON-like parsing
-                        quotes = re.findall(r'"([^"]*)"', line)
-                        for quote in quotes:
-                            if quote.strip() and len(quote.strip()) > 2 and quote.lower() not in ['transcript', 'text']:
-                                logger.info(f"Found transcript: {quote.strip()}")
-                                return quote.strip()
+                    # RIVA format: "0 : Hello." or "0 : Can you please resolve my email verification issue? "
+                    if line.strip().startswith("0 : "):
+                        transcript = line.strip()[4:].strip()  # Remove "0 : " prefix
+                        if transcript and len(transcript) > 1:
+                            # Clean up transcript
+                            transcript = transcript.strip('"').strip("'").strip()
+                            if transcript:
+                                logger.info(f"RIVA transcript found: {transcript}")
+                                return transcript
 
-                    # Original parsing method
-                    elif '"' in line and 'throughput' not in line.lower():
-                        import re
-                        quotes = re.findall(r'"([^"]*)"', line)
-                        for quote in quotes:
-                            if quote.strip() and len(quote.strip()) > 2:
-                                logger.info(f"ASR result: {quote.strip()}")
-                                return quote.strip()
-
-                # Try alternative parsing - look for any text after "transcript" or "text"
+                # Fallback: Look for any line with meaningful speech content
                 for line in lines:
-                    if 'transcript' in line.lower() or 'final' in line.lower():
-                        # Extract any meaningful text from the line
+                    # Skip metadata lines
+                    if any(x in line.lower() for x in ['loading', 'file:', 'done loading', 'audio processed', 'run time', 'total audio', 'throughput']):
+                        continue
+
+                    # Look for lines that look like speech
+                    if line.strip() and not line.strip().startswith('-') and len(line.strip()) > 3:
+                        # Remove timestamps and confidence scores
                         import re
-                        # Remove common non-speech words
-                        cleaned = re.sub(r'(transcript|final|result|confidence|throughput)', '', line, flags=re.IGNORECASE)
-                        words = re.findall(r'\b[a-zA-Z]{3,}\b', cleaned)
-                        if words:
-                            transcript = ' '.join(words)
-                            logger.info(f"Alternative parsing result: {transcript}")
-                            return transcript
+                        cleaned = re.sub(r'\d+\.\d+e[+-]\d+', '', line)  # Remove scientific notation
+                        cleaned = re.sub(r'\d{4,}', '', cleaned)          # Remove timestamps
+                        cleaned = cleaned.strip()
+
+                        # Check if it looks like speech
+                        if cleaned and len(cleaned) > 3 and any(c.isalpha() for c in cleaned):
+                            logger.info(f"Fallback transcript: {cleaned}")
+                            return cleaned
 
             else:
                 logger.error(f"RIVA ASR failed with returncode: {result.returncode}")
