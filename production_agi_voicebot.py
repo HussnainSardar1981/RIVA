@@ -1,7 +1,6 @@
 #!/home/aiadmin/netovo_voicebot/venv/bin/python3
 """
-Simplified AGI VoiceBot - Direct Docker calls with proven commands
-Uses the exact same TTS commands that work in your test
+FIXED AGI VoiceBot - Proper file paths and WAV format
 """
 
 import sys
@@ -24,7 +23,7 @@ import logging
 try:
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - SimpleBot - %(message)s',
+        format='%(asctime)s - FixedBot - %(message)s',
         handlers=[
             logging.FileHandler('/var/log/asterisk/voicebot.log', mode='a'),
             logging.StreamHandler(sys.stderr)
@@ -34,7 +33,7 @@ except PermissionError:
     # Fallback to stderr only if can't write to log file
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - SimpleBot - %(message)s',
+        format='%(asctime)s - FixedBot - %(message)s',
         handlers=[logging.StreamHandler(sys.stderr)]
     )
 
@@ -100,18 +99,18 @@ class SimpleAGI:
         if '.' in filename:
             filename = filename.rsplit('.', 1)[0]
 
-        # Log what we're trying to play (check for both .sln16 and .wav)
-        sln16_path = f"/var/lib/asterisk/sounds/{filename}.sln16"
+        # Check for both WAV and SLIN16 files in root sounds directory
         wav_path = f"/var/lib/asterisk/sounds/{filename}.wav"
+        sln16_path = f"/var/lib/asterisk/sounds/{filename}.sln16"
 
-        if os.path.exists(sln16_path):
-            file_size = os.path.getsize(sln16_path)
-            logger.info(f"Attempting to play SLIN16: {filename} (file exists: {file_size} bytes)")
-        elif os.path.exists(wav_path):
+        if os.path.exists(wav_path):
             file_size = os.path.getsize(wav_path)
-            logger.info(f"Attempting to play WAV: {filename} (file exists: {file_size} bytes)")
+            logger.info(f"Playing WAV: {filename} (file exists: {file_size} bytes)")
+        elif os.path.exists(sln16_path):
+            file_size = os.path.getsize(sln16_path)
+            logger.info(f"Playing SLIN16: {filename} (file exists: {file_size} bytes)")
         else:
-            logger.error(f"Audio file not found: {sln16_path} or {wav_path}")
+            logger.error(f"Audio file not found: {wav_path} or {sln16_path}")
 
         result = self.command(f'STREAM FILE {filename} ""')
         success = result and result.startswith('200')
@@ -265,32 +264,24 @@ class SimpleOllamaClient:
             return "I'm having technical difficulties. How else can I help?"
 
 def convert_audio_for_asterisk(input_wav):
-    """Convert to 8kHz mono SLIN16 raw format for Asterisk"""
+    """Convert to 8kHz mono WAV format for Asterisk - FIXED PATHS"""
     try:
         timestamp = int(time.time())
-        custom_dir = "/var/lib/asterisk/sounds/custom"
-        output_path = f"{custom_dir}/tts_{timestamp}.sln16"
+        # FIXED: Save directly to sounds root directory, not custom/
+        output_path = f"/var/lib/asterisk/sounds/tts_{timestamp}.wav"
 
-        # Ensure directory exists
-        os.makedirs(custom_dir, exist_ok=True)
-        logger.info(f"Converting {input_wav} to SLIN16: {output_path}")
+        logger.info(f"Converting {input_wav} to WAV: {output_path}")
 
-        # Convert to raw 16-bit signed linear PCM (SLIN16 format)
-        # -t raw = raw output (no container)
-        # -e signed-integer = signed PCM
-        # -b 16 = 16-bit depth
-        # -L = little-endian byte order
+        # Convert to 8kHz mono 16-bit PCM WAV (same as built-in sounds)
         sox_cmd = [
             'sox', input_wav,
             '-r', '8000',           # 8kHz sample rate
             '-c', '1',              # Mono
-            '-t', 'raw',            # Raw output (no WAV container)
+            '-b', '16',             # 16-bit depth
             '-e', 'signed-integer', # Signed PCM
-            '-b', '16',             # 16-bit
-            '-L',                   # Little-endian
-            output_path
+            output_path             # WAV format (default)
         ]
-        logger.info(f"Sox SLIN16 command: {' '.join(sox_cmd)}")
+        logger.info(f"Sox WAV command: {' '.join(sox_cmd)}")
 
         result = subprocess.run(sox_cmd, capture_output=True, text=True, timeout=10)
 
@@ -304,25 +295,26 @@ def convert_audio_for_asterisk(input_wav):
             file_size = os.path.getsize(output_path)
             if file_size > 0:
                 os.chmod(output_path, 0o644)
-                logger.info(f"SLIN16 converted successfully: {output_path} ({file_size} bytes)")
-                return f"custom/tts_{timestamp}"  # Return without .sln16 extension
+                logger.info(f"WAV converted successfully: {output_path} ({file_size} bytes)")
+                # FIXED: Return just filename without path or extension
+                return f"tts_{timestamp}"
             else:
-                logger.error(f"SLIN16 file is empty: {output_path}")
+                logger.error(f"WAV file is empty: {output_path}")
                 return None
         else:
-            logger.error(f"Sox SLIN16 conversion failed: returncode={result.returncode}, stderr={result.stderr}")
+            logger.error(f"Sox WAV conversion failed: returncode={result.returncode}, stderr={result.stderr}")
             return None
 
     except Exception as e:
         logger.error(f"Audio conversion error: {e}")
         import traceback
-        logger.error(f"SLIN16 traceback: {traceback.format_exc()}")
+        logger.error(f"WAV traceback: {traceback.format_exc()}")
         return None
 
 def main():
     """Main AGI handler"""
     try:
-        logger.info("=== Simple AGI VoiceBot Starting ===")
+        logger.info("=== FIXED AGI VoiceBot Starting ===")
 
         # Initialize AGI
         agi = SimpleAGI()
@@ -335,7 +327,7 @@ def main():
             return
 
         agi.sleep(1)
-        agi.verbose("Simple VoiceBot Active")
+        agi.verbose("Fixed VoiceBot Active")
 
         # Initialize components
         tts = DirectTTSClient()
@@ -362,10 +354,16 @@ def main():
                 logger.info(f"Greeting played: {success}")
             else:
                 logger.error("Audio conversion failed")
-                agi.stream_file("hello")  # Fallback
+                # Find any working built-in sound as fallback
+                for fallback in ['demo-thanks', 'demo-congrats', 'beep']:
+                    if agi.stream_file(fallback):
+                        break
         else:
             logger.error("TTS greeting failed")
-            agi.stream_file("hello")  # Fallback
+            # Fallback to built-in sound
+            for fallback in ['demo-thanks', 'demo-congrats', 'beep']:
+                if agi.stream_file(fallback):
+                    break
 
         # Simple conversation loop
         for turn in range(3):
@@ -425,9 +423,15 @@ def main():
                 if asterisk_file:
                     agi.stream_file(asterisk_file)
                 else:
-                    agi.stream_file("demo-thanks")  # Fallback
+                    # Fallback to built-in sound
+                    for fallback in ['demo-thanks', 'demo-congrats']:
+                        if agi.stream_file(fallback):
+                            break
             else:
-                agi.stream_file("demo-thanks")  # Fallback
+                # Fallback to built-in sound
+                for fallback in ['demo-thanks', 'demo-congrats']:
+                    if agi.stream_file(fallback):
+                        break
 
             # Check for exit
             if 'thank you' in response.lower() or 'great day' in response.lower():
@@ -440,7 +444,7 @@ def main():
         agi.sleep(1)
         agi.hangup()
 
-        logger.info("=== Simple VoiceBot completed ===")
+        logger.info("=== Fixed VoiceBot completed ===")
 
     except Exception as e:
         logger.error(f"Fatal error: {e}")
