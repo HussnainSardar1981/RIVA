@@ -272,7 +272,7 @@ def convert_audio_for_asterisk(input_wav):
         formats_to_try = [
             {
                 'ext': 'wav',
-                'path': f"/var/lib/asterisk/sounds/tts_{timestamp}.wav",
+                'path': f"/usr/share/asterisk/sounds/tts_{timestamp}.wav",
                 'sox_args': [
                     'sox', input_wav,
                     '-r', '8000',      # 8kHz sample rate
